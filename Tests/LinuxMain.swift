@@ -3,5 +3,5 @@ import XCTest
 import MammalKernelTests
 
 var tests = [XCTestCaseEntry]()
-tests += MammalKernelTests.allTests()
+tests += KernelTests.allTests()
 XCTMain(tests)
