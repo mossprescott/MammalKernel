@@ -61,7 +61,7 @@ public indirect enum Expr<T> {
     /// Constructs an unevaluated function, which can later be applied to some arguments via `App`.
     /// Note: if a name is provided, it is bound to the function itself when the body is evaluated,
     /// so that directly recursive functions can be defined.
-    case Lambda(_: Name?, params: [Name], body: Expr)
+    case Lambda(Name?, params: [Name], body: Expr)
 
     /// Applies a function to some arguments:
     /// - evaluate `fn` to a value, which must be an unevaluated function
@@ -74,17 +74,23 @@ public indirect enum Expr<T> {
     /// Expands a partially-constructed value, which may involve sub-expressions which need to be
     /// evaluated in the current scope. The result of expansion is a new expression which is then
     /// evaluated.
-    case Quote(expand: ((Expr) throws -> Value<T>) throws -> Expr)
+    case Quote(expand: (EvalInContext<T>) throws -> Expr)
 
     /// Attempts to match the value of an expression against some externally-defined pattern. If the
     /// match succeeds, it produces a value for each binding, and `body` is evaluated with them in scope.
     /// If not, no new names are bound, and `otherwise` is evaluated instead.
     /// If the match succeeds but produces the wrong number of values, then an error is thrown, but if the match
     /// produces values in an unexpected order, then hilarity ensues.
-    case Match(expr: Expr, bindings: [Name], body: Expr, otherwise: Expr, match: (Value<T>) throws -> MatchResult<T>)
+    case Match(expr: Expr, bindings: [Name], body: Expr, otherwise: Expr, match: MatchAndBind<T>)
 }
 
-/// Esentially,
+/// Type for the function you use to look up values embedded in quotations. One of these is provided by the evaluator for your use.
+public typealias EvalInContext<T> = (Expr<T>) throws -> Value<T>
+
+/// Type for helper functions used with `Expr.Match`. You provide one of these when you construct a Match expression.
+public typealias MatchAndBind<T> = (Value<T>) throws -> MatchResult<T>
+
+/// Isomorphic to `[Value<T>]?`, but less confusing, especially when the result is `[]`.
 public enum MatchResult<T> {
     case Matched([Value<T>])
     case NoMatch
@@ -96,7 +102,7 @@ public enum Value<T> {
     case Val(T)
 
     /// TODO: optional `Expr` which was used to define the function (but which might contain free vars.)
-    case Fn(arity: Int, ([Value]) throws -> Value)
+    case Fn(arity: Int, body: ([Value]) throws -> Value)
 
     /// True if this is a simple value equal to the given. There's no simple way to compare Fn values.
     public func isVal(_ val: T) -> Bool where T: Equatable {
@@ -190,13 +196,13 @@ public enum RuntimeError<T>: Error {
     case NotBound(_: Name)
 }
 
-/// Evaluate with a set of bindings, then wrap the result in an Expr, possibly discarding a non-representable value.
-/// TODO: it's probably not possible to map values back to expressions without some knowledge of the underlying
-/// type, so this will be implemented elsewhere.
-public func eval<T>(_ node: Expr<T>, env: Environment<T>) throws -> Expr<T> {
-    let result = try eval0(node, env: env)
-    fatalError("TODO")
-}
+///// Evaluate with a set of bindings, then wrap the result in an Expr, possibly discarding a non-representable value.
+///// TODO: it's probably not possible to map values back to expressions without some knowledge of the underlying
+///// type, so this will be implemented elsewhere.
+//public func eval<T>(_ node: Expr<T>, env: Environment<T>) throws -> Expr<T> {
+//    let result = try eval0(node, env: env)
+//    fatalError("TODO")
+//}
 
 
 /// TODO: not public, if nobody needs to use it directly (except possibly tests)
@@ -218,13 +224,18 @@ public func eval0<T>(_ node: Expr<T>, env: Environment<T>) throws -> Value<T> {
         let newEnv = env.with(name, boundTo: value)
         return try eval0(body, env: newEnv)
 
-    case .Lambda(_, let params, let body):
-        // TODO: (lazily) bind the name (if not nil), inside the value that it refers to.
-        // Yes, that is a bit mind-bending.
-        return .Fn(arity: params.count) { args in
-            let newEnv = try env.with(names: params, boundTo: args)
+    case .Lambda(let name, let params, let body):
+        func f(args: [Value<T>]) throws -> Value<T> {
+            var newEnv = try env.with(names: params, boundTo: args)
+            if let n = name {
+                // Yikes: this is one way to get the lambda's name bound when it's
+                // evaluated, but it ain't pretty. Is there a more natural way to
+                // close this loop?
+                newEnv = newEnv.with(n, boundTo: .Fn(arity: params.count, body: f))
+            }
             return try eval0(body, env: newEnv)
         }
+        return .Fn(arity: params.count, body: f)
 
     case .App(let fn, let args):
         return try eval0(fn, env: env).withFn { (arity, f) in
@@ -249,6 +260,20 @@ public func eval0<T>(_ node: Expr<T>, env: Environment<T>) throws -> Value<T> {
             return try eval0(body, env: newEnv)
         case .NoMatch:
             return try eval0(otherwise, env: env)
+        }
+    }
+}
+
+
+// MARK: - Debugging aids
+
+extension Environment: CustomDebugStringConvertible {
+    public var debugDescription: String {
+        switch self {
+        case .Empty:
+            return "<empty>"
+        case .Scope(let name, let value, let parent):
+            return parent.debugDescription + "\n\(name.id) = \(value)"
         }
     }
 }
