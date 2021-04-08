@@ -58,7 +58,7 @@ public indirect enum Expr<T> {
     /// then evaluates its `body` in that environment.
     case Let(_: Name, expr: Expr, body: Expr)
 
-    /// Constructs an unevaluated function, which can later by applied to some arguments via `App`.
+    /// Constructs an unevaluated function, which can later be applied to some arguments via `App`.
     /// Note: if a name is provided, it is bound to the function itself when the body is evaluated,
     /// so that directly recursive functions can be defined.
     case Lambda(_: Name?, params: [Name], body: Expr)
@@ -79,11 +79,15 @@ public indirect enum Expr<T> {
     /// Attempts to match the value of an expression against some externally-defined pattern. If the
     /// match succeeds, it produces a value for each binding, and `body` is evaluated with them in scope.
     /// If not, no new names are bound, and `otherwise` is evaluated instead.
-    /// if the match succeeds but produces the wrong number of values, then an error is thrown, but if the match
+    /// If the match succeeds but produces the wrong number of values, then an error is thrown, but if the match
     /// produces values in an unexpected order, then hilarity ensues.
-    ///
-    /// TODO: use an enum for this result? `nil` (no match) vs `[]` (no bindings) is probably too easy to mix up.
-    case Match(expr: Expr, bindings: [Name], body: Expr, otherwise: Expr, match: (Value<T>) throws -> [Value<T>]?)
+    case Match(expr: Expr, bindings: [Name], body: Expr, otherwise: Expr, match: (Value<T>) throws -> MatchResult<T>)
+}
+
+/// Esentially,
+public enum MatchResult<T> {
+    case Matched([Value<T>])
+    case NoMatch
 }
 
 /// A "run-time" value can be either a simple value or an unevaluated function, which may have been defined
@@ -239,11 +243,11 @@ public func eval0<T>(_ node: Expr<T>, env: Environment<T>) throws -> Value<T> {
 
     case .Match(let expr, let bindings, let body, let otherwise, let match):
         let value = try eval0(expr, env: env)
-        if let boundValues = try match(value) {
+        switch try match(value) {
+        case .Matched(let boundValues):
             let newEnv = try env.with(names: bindings, boundTo: boundValues)
             return try eval0(body, env: newEnv)
-        }
-        else {
+        case .NoMatch:
             return try eval0(otherwise, env: env)
         }
     }

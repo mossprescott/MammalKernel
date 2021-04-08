@@ -1,7 +1,7 @@
 import XCTest
 import MammalKernel
 
-final class KernelTests: XCTestCase {
+final class EvalTests: XCTestCase {
     func testEvalLiteral() throws {
         let env = Environment<Int>.Empty
 
@@ -112,10 +112,10 @@ final class KernelTests: XCTestCase {
         let prg = Expr<Int>.Match(expr: .Var(x), bindings: [], body: .Literal(1), otherwise: .Literal(0)) {
             try $0.withVal { val in
                 if val > 0 {
-                    return []  // meaning a match, with no bindings introduced
+                    return .Matched([])
                 }
                 else {
-                    return nil  // meaning no match
+                    return .NoMatch
                 }
             }
         }
