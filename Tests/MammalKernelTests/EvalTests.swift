@@ -2,7 +2,7 @@ import XCTest
 import MammalKernel
 
 final class EvalTests: XCTestCase {
-    func testEvalLiteral() throws {
+    func testLiteral() throws {
         let env = Environment<Int>.Empty
 
         let prg = Expr<Int>.Literal(0)
@@ -16,7 +16,7 @@ final class EvalTests: XCTestCase {
         }
     }
 
-    func testEvalVar() throws {
+    func testVar() throws {
         let x = Name(id: 0)
 
         let env = Environment<Int>.bindOne(x, to: .Val(0))
@@ -32,7 +32,7 @@ final class EvalTests: XCTestCase {
         }
     }
 
-    func testEvalLet() throws {
+    func testLet() throws {
         let x = Name(id: 0)
 
         let env = Environment<Int>.Empty
@@ -45,7 +45,7 @@ final class EvalTests: XCTestCase {
     }
 
     /// Just define a function (then test by calling it directly).
-    func testEvalFn() throws {
+    func testFn() throws {
         let x = Name(id: 0)
 
         let env = Environment<Int>.Empty
@@ -66,7 +66,7 @@ final class EvalTests: XCTestCase {
     }
 
     /// Define a function externally, then apply it.
-    func testEvalApp() throws {
+    func testApp() throws {
         let f = Name(id: 0)
 
         let identityFn: Value<Int> = .Fn(arity: 1) { args in args[0] }
@@ -79,7 +79,7 @@ final class EvalTests: XCTestCase {
     }
 
     /// Expand a trivial quotation.
-    func testEvalQuote() throws {
+    func testQuote() throws {
         let env = Environment<Int>.Empty
 
         let prg = Expr<Int>.Quote(expand: { _ in .Literal(1) })
@@ -89,7 +89,7 @@ final class EvalTests: XCTestCase {
     }
 
     /// Expand a quotation that refers to a value from the current scope: `x + 2`.
-    func testEvalQuote1() throws {
+    func testQuote1() throws {
         let x = Name(id: 0)
 
         let env = Environment<Int>.bindOne(x, to: .Val(1))
@@ -106,7 +106,7 @@ final class EvalTests: XCTestCase {
     }
 
     /// Match any positive int. No bindings.
-    func testEvalMatch() throws {
+    func testMatch() throws {
         let x = Name(id: 0)
 
         let prg = Expr<Int>.Match(expr: .Var(x), bindings: [], body: .Literal(1), otherwise: .Literal(0)) {
@@ -135,13 +135,13 @@ final class EvalTests: XCTestCase {
 // TODO: lots of error cases that should throw a descriptive error and not just die or hang
 
     static var allTests = [
-        ("testEvalLiteral", testEvalLiteral),
-        ("testEvalVar", testEvalVar),
-        ("testEvalLet", testEvalLet),
-        ("testEvalFn", testEvalFn),
-        ("testEvalApp", testEvalApp),
-        ("testEvalQuote", testEvalQuote),
-        ("testEvalQuote1", testEvalQuote1),
-        ("testEvalMatch", testEvalMatch),
+        ("testLiteral", testLiteral),
+        ("testVar", testVar),
+        ("testLet", testLet),
+        ("testFn", testFn),
+        ("testApp", testApp),
+        ("testQuote", testQuote),
+        ("testQuote1", testQuote1),
+        ("testMatch", testMatch),
     ]
 }
