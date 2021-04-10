@@ -65,8 +65,14 @@ public enum Kernel {
                 }
             }.merge()
 
-        case .Node(let id, Var.type, _):
-            return .Var(Eval.Name(id: id.id))
+        case .Node(let id, Var.type, let content):
+            switch content {
+            case .Ref(let target):
+                return .Var(Eval.Name(id: target.id)) // TODO: look under "ref"
+
+            default:
+                return .Fail(message: "Var is not a Ref at node \(id)")
+            }
 
         case .Node(let id, Let.type, let content):
             let bindResult: Either<Eval.Expr<Value>, NodeId> =
@@ -248,7 +254,7 @@ public enum Kernel {
     public enum Var {
         public static let type = NodeType("kernel", "var")
         /// A Ref node pointing to the node that binds the variable.
-        public static let ref = AttrName(type, "ref")
+//        public static let ref = AttrName(type, "ref")
     }
 
     public enum Let {
