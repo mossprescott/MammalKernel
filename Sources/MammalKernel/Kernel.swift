@@ -33,7 +33,7 @@ public enum Kernel {
     ///
     /// If there are any structural errors, the resulting expression will fail (that is, produce an `Error` value
     /// when it's evaluated; if that portion of the program is never evaluated, no harm done.
-    static func translate(_ node: Node) -> Eval.Expr<Value> {
+    static func translate(_ node: Node) -> Eval.Expr<Node.Value> {
         switch node.type {
         case Nil.type:
             return .Literal(.Prim(.Nil))
@@ -72,7 +72,7 @@ public enum Kernel {
             }
 
         case Let.type:
-            let bindResult: Either<Eval.Expr<Value>, NodeId> =
+            let bindResult: Either<Eval.Expr<Node.Value>, NodeId> =
                 requiredAttr(node, Let.bind, expected: "Bind") { val in
                     switch val {
                     case .Node(let bindNode) where bindNode.type == Bind.type:
@@ -111,9 +111,9 @@ public enum Kernel {
     private static func requiredAttrToExpr(
         _ node: Node, _ attr: AttrName,
         expected: String,
-        handle: (Node) -> Eval.Expr<Value>?)
-    -> Eval.Expr<Value> {
-        requiredAttr(node, attr, expected: expected) { val -> Eval.Expr<Value>? in
+        handle: (Node) -> Eval.Expr<Node.Value>?)
+    -> Eval.Expr<Node.Value> {
+        requiredAttr(node, attr, expected: expected) { val -> Eval.Expr<Node.Value>? in
             switch val {
             case .Prim(let prim):
                 return .Fail(message: "Unexpected value for attribute \(attr) at node \(node.id); expected an expression, found primitive: \(prim)")
@@ -141,8 +141,8 @@ public enum Kernel {
     private static func requiredAttr<T>(
         _ node: Node, _ attr: AttrName,
         expected: String,
-        handle: (Value) -> T?)
-    -> Either<Eval.Expr<Value>, T> {
+        handle: (Node.Value) -> T?)
+    -> Either<Eval.Expr<Node.Value>, T> {
         switch node.content {
         case .Attrs(let attrs):
             if let val = attrs[attr] {
@@ -173,7 +173,7 @@ public enum Kernel {
     /// an expression that evaluates to the same value.
     /// Ordinary values are simply returned, but unevaluated functions and errors both get converted
     /// back to "expressions" that aren't very useful when evaluated.
-    static func repr(_ value: Eval.Value<Value>) -> Node {
+    static func repr(_ value: Eval.Value<Node.Value>) -> Node {
         switch value {
         case .Val(.Node(let node)):
             return node
@@ -181,45 +181,37 @@ public enum Kernel {
         case .Val(.Prim(let prim)):
             switch prim {
             case .Nil:
-                return Node(id: freshNodeId(),
-                            type: Nil.type,
-                            content: .Empty)
+                return Node(freshNodeId(),
+                            Nil.type,
+                            .Empty)
 
             case .Bool(_):
-                return Node(id: freshNodeId(),
-                            type: Bool_.type,
-                            content: .Attrs([Bool_.value: .Prim(prim)]))
+                return Node(freshNodeId(),
+                            Bool_.type,
+                            .Attrs([Bool_.value: .Prim(prim)]))
 
             case .Int(_):
-                return Node(id: freshNodeId(),
-                            type: Int_.type,
-                            content: .Attrs([Int_.value: .Prim(prim)]))
+                return Node(freshNodeId(),
+                            Int_.type,
+                            .Attrs([Int_.value: .Prim(prim)]))
 
             case .String(_):
-                return Node(id: freshNodeId(),
-                            type: String_.type,
-                            content: .Attrs([String_.value: .Prim(prim)]))
+                return Node(freshNodeId(),
+                            String_.type,
+                            .Attrs([String_.value: .Prim(prim)]))
             }
 
-//        case .Val(.Node(let node)):
-//            switch value {
-//            case .Val(let val):
-//                return val
-//            default:
-//                fatalError("doesn't happen")  // because we literally just matched it as a .Node
-//            }
-
         case .Fn(let arity, _):
-            return Node(id: freshNodeId(),
-                        type: Fn.type,
-                        content: .Attrs([
+            return Node(freshNodeId(),
+                        Fn.type,
+                        .Attrs([
                             Fn.arity: .Prim(.Int(arity))
                         ]))
 
         case .Error(let err):
-            return Node(id: freshNodeId(),
-                        type: Error.type,
-                        content: .Attrs([
+            return Node(freshNodeId(),
+                        Error.type,
+                        .Attrs([
                             Error.description: .Prim(.String(String(describing: err)))
                         ]))
         }

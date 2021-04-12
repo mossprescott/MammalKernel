@@ -8,47 +8,47 @@ public class KernelGen {
     public init() {}
 
     public func Nil() -> Node {
-        return Node(id: idGen.generateId(),
-                    type: Kernel.Nil.type,
-                    content: .Empty)
+        return Node(idGen.generateId(),
+                    Kernel.Nil.type,
+                    .Empty)
     }
 
     public func Bool(_ val: Bool) -> Node {
-        return Node(id: idGen.generateId(),
-                     type: Kernel.Bool_.type,
-                     content: .Attrs([
+        return Node(idGen.generateId(),
+                    Kernel.Bool_.type,
+                    .Attrs([
                         Kernel.Bool_.value: .Prim(.Bool(val))
                      ]))
     }
 
     public func Int(_ val: Int) -> Node {
-        return Node(id: idGen.generateId(),
-                     type: Kernel.Int_.type,
-                     content: .Attrs([
+        return Node(idGen.generateId(),
+                    Kernel.Int_.type,
+                    .Attrs([
                         Kernel.Int_.value: .Prim(.Int(val))
                      ]))
     }
 
     public func String(_ val: String) -> Node {
-        return Node(id: idGen.generateId(),
-                     type: Kernel.String_.type,
-                     content: .Attrs([
+        return Node(idGen.generateId(),
+                    Kernel.String_.type,
+                    .Attrs([
                         Kernel.String_.value: .Prim(.String(val))
                      ]))
     }
 
     public func Let(expr: Node, body: (() -> Node) -> Node) -> Node {
-        let bind = Node(id: idGen.generateId(),
-                        type: Kernel.Bind.type,
-                        content: .Empty)
+        let bind = Node(idGen.generateId(),
+                        Kernel.Bind.type,
+                        .Empty)
         func ref() -> Node {
-            Node(id: idGen.generateId(),
-                 type: Kernel.Var.type,
-                 content: .Ref(bind.id))
+            Node(idGen.generateId(),
+                 Kernel.Var.type,
+                 .Ref(bind.id))
         }
-        return Node(id: idGen.generateId(),
-                    type: Kernel.Let.type,
-                    content: .Attrs([
+        return Node(idGen.generateId(),
+                    Kernel.Let.type,
+                    .Attrs([
                         Kernel.Let.bind: .Node(bind),
                         Kernel.Let.expr: .Node(expr),
                         Kernel.Let.body: .Node(body(ref))

@@ -78,15 +78,23 @@ public struct Node {
         /// so you don't have to ask yourself whether an empty `Attrs` or `Elems` is appropriate.
         case Empty
     }
+
+    /// The value stored as an attribute may be a primitive or node. That's the only way a primitive can
+    /// appear in a tree.
+    public enum Value {
+        case Prim(Primitive)
+        case Node(Node)
+    }
+
+    /// Simplified constructor; no need to name each field, since the types are distinct and the meaning of each is clear.
+    public init(_ id: NodeId, _ type: NodeType, _ content: Content) {
+        self.id = id
+        self.type = type
+        self.content = content
+    }
 }
 
-/// A value may be a Primitive (leaf) or Node.
-public enum Value {
-    case Prim(Primitive)
-    case Node(Node)
-}
-
-/// Primitive values which may appear as attributes/elements. Note: more primitives will be added as
+/// Primitive values which may appear as attributes. Note: more primitives will be added as
 /// necessary, but the intention is to cover only the most commonly-used values, plus a very general
 /// container for embedding arbitrary data.
 public enum Primitive: Equatable {
@@ -101,6 +109,6 @@ public enum Primitive: Equatable {
 /// - every node has a unique id
 /// - every Ref refers to a node that is present (no free vars), and is not the Ref itself
 /// - TODO: what else?
-public func checkWellFormedness(value: Value) -> Bool {
+public func checkWellFormedness(value: Node) -> Bool {
     fatalError("TODO")
 }
