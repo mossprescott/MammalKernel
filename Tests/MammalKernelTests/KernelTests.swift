@@ -12,7 +12,9 @@ final class KernelTests: XCTestCase {
 
         let result = try Kernel.eval(pgm)
 
-        XCTAssertEqual(pgm.diff(result), [])
+        let expected = pgm
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
     }
 
     /// Trivial: `let x = 137 in x`.
@@ -25,9 +27,7 @@ final class KernelTests: XCTestCase {
 
         let result = try Kernel.eval(pgm)
 
-        print(result)
-
-        XCTAssertEqual(expected.diff(result), [])
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
     }
 
     static var allTests = [
