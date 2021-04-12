@@ -5,42 +5,23 @@ final class KernelTests: XCTestCase {
 
 // MARK: - ?
 
+    let gen = KernelGen()
+
     func testLiteral() throws {
-        let pgm = Value.Node(id: NodeId(42), type: Kernel.Nil.type, content: .Empty)
+        let pgm = gen.Nil()
 
         let result = try Kernel.eval(pgm)
 
         XCTAssertEqual(pgm.diff(result), [])
     }
 
-    /// `let x = 1 in x`. Hey, these programs are a pain to write out by hand!
+    /// Trivial: `let x = 137 in x`.
     func testLet() throws {
-        let pgm = Value.Node(id: NodeId(42),
-                             type: Kernel.Let.type,
-                             content: .Attrs([
-                                Kernel.Let.bind:
-                                    .Node(id: NodeId(43),
-                                          type: Kernel.Bind.type,
-                                          content: .Empty),
-                                Kernel.Let.expr:
-                                    .Node(id: NodeId(44),
-                                          type: Kernel.Int_.type,
-                                          content: .Attrs([
-                                            Kernel.Int_.value:
-                                                .Prim(.Int(137))
-                                          ])),
-                                Kernel.Let.body:
-                                    .Node(id: NodeId(45),
-                                          type: Kernel.Var.type,
-                                          content: .Ref(NodeId(43)))
-                             ]))
+        let pgm = gen.Let(expr: gen.Int(137)) { ref in
+            ref()
+        }
 
-        let expected = Value.Node(id: NodeId(0),
-                                  type: Kernel.Int_.type,
-                                  content: .Attrs([
-                                    Kernel.Int_.value:
-                                        .Prim(.Int(137))
-                                  ]))
+        let expected = gen.Int(137)
 
         let result = try Kernel.eval(pgm)
 
