@@ -1,7 +1,7 @@
 /// Node and attribute types defining the Mammal Kernel language, and mapping them
 /// to the low-level AST for evaluation.
 ///
-/// This is work is separated form the actual evaluator because it involves a lot of tedious
+/// This is work is separated from the actual evaluator because it involves a lot of tedious
 /// deconstruction of nodes. Putting it here keeps the evaluator itself simpler and easier to
 /// test and debug.
 ///
@@ -13,7 +13,7 @@ public enum Kernel {
     ///
     /// TODO: some kind of "environment" which maps additional nodes to expressions, as well
     /// as an actual `Environment` with values for eval0.
-    public static func eval(_ program: Value) throws -> Value {
+    public static func eval(_ program: Node) throws -> Node {
         let ast = translate(program)
 
         let result = try Eval.eval(ast, env: .Empty)
@@ -33,95 +33,95 @@ public enum Kernel {
     ///
     /// If there are any structural errors, the resulting expression will fail (that is, produce an `Error` value
     /// when it's evaluated; if that portion of the program is never evaluated, no harm done.
-    static func translate(_ program: Value) -> Eval.Expr<Value> {
-        switch program {
-        case .Prim(_):
-            return .Fail(message: "Unexpected bare primitive: \(program)")
-
-        case .Node(_, Nil.type, _):
+    static func translate(_ node: Node) -> Eval.Expr<Value> {
+        switch node.type {
+        case Nil.type:
             return .Literal(.Prim(.Nil))
 
-        case .Node(let id, Bool_.type, let content):
-            return requiredAttr(id, content, Bool_.value, expected: "Bool") { val in
+        case Bool_.type:
+            return requiredAttr(node, Bool_.value, expected: "Bool") { val in
                 switch val {
                 case .Prim(.Bool(_)): return .Literal(val)
                 default: return nil
                 }
             }.merge()
 
-        case .Node(let id, Int_.type, let content):
-            return requiredAttr(id, content, Int_.value, expected: "Int") { val in
+        case Int_.type:
+            return requiredAttr(node, Int_.value, expected: "Int") { val in
                 switch val {
                 case .Prim(.Int(_)): return .Literal(val)
                 default: return nil
                 }
             }.merge()
 
-        case .Node(let id, String_.type, let content):
-            return requiredAttr(id, content, String_.value, expected: "String") { val in
+        case String_.type:
+            return requiredAttr(node, String_.value, expected: "String") { val in
                 switch val {
                 case .Prim(.String(_)): return .Literal(val)
                 default: return nil
                 }
             }.merge()
 
-        case .Node(let id, Var.type, let content):
-            switch content {
+        case Var.type:
+            switch node.content {
             case .Ref(let target):
                 return .Var(Eval.Name(id: target.id)) // TODO: look under "ref"
 
             default:
-                return .Fail(message: "Var is not a Ref at node \(id)")
+                return .Fail(message: "Var is not a Ref at node \(node.id)")
             }
 
-        case .Node(let id, Let.type, let content):
+        case Let.type:
             let bindResult: Either<Eval.Expr<Value>, NodeId> =
-                requiredAttr(id, content, Let.bind, expected: "Bind") { val in
+                requiredAttr(node, Let.bind, expected: "Bind") { val in
                     switch val {
-                    case .Node(let bindId, Bind.type, _):
-                        return bindId
+                    case .Node(let bindNode) where bindNode.type == Bind.type:
+                        return bindNode.id
                     default:
                         return nil
                     }
                 }
             switch bindResult {
             case .right(let bindId):
-                let expr = requiredAttrToExpr(id, content, Let.expr, expected: "<Expr>", handle: translate)
-                let body = requiredAttrToExpr(id, content, Let.body, expected: "<Expr>", handle: translate)
+                let expr = requiredAttrToExpr(node, Let.expr, expected: "<Expr>", handle: translate)
+                let body = requiredAttrToExpr(node, Let.body, expected: "<Expr>", handle: translate)
                 return .Let(Eval.Name(id: bindId.id), expr: expr, body: body)
             case .left(let failExpr):
                 return failExpr
             }
 
-        case .Node(let id, Lambda.type, let content):
+        case Lambda.type:
             fatalError("TODO")
 
-        case .Node(let id, App.type, let content):
+        case App.type:
             fatalError("TODO")
 
-        case .Node(let id, Quote.type, let content):
+        case Quote.type:
             fatalError("TODO")
 
-        case .Node(let id, Match.type, let content):
+        case Match.type:
             fatalError("TODO")
 
-        case .Node(_, let type, _):
-            return .Fail(message: "Unexpected node type: \(type.type)")
+        default:
+            return .Fail(message: "Unexpected node type: \(node.type)")
         }
     }
 
-    /// Extract an attribute which is to translated directly to an `Expr`. If anything doesn't match, `Fail`.
+    /// Extract an attribute which is to be translated directly to an `Expr`. If anything doesn't match, `Fail`.
     private static func requiredAttrToExpr(
-        _ id: NodeId, _ node: NodeContent, _ attr: AttrName,
+        _ node: Node, _ attr: AttrName,
         expected: String,
-        handle: (Value) -> Eval.Expr<Value>?)
+        handle: (Node) -> Eval.Expr<Value>?)
     -> Eval.Expr<Value> {
-        switch requiredAttr(id, node, attr, expected: expected, handle: handle) {
-        case .right(let expr):
-            return expr
-        case .left(let expr):
-            return expr
+        requiredAttr(node, attr, expected: expected) { val -> Eval.Expr<Value>? in
+            switch val {
+            case .Prim(let prim):
+                return .Fail(message: "Unexpected value for attribute \(attr) at node \(node.id); expected an expression, found primitive: \(prim)")
+            case .Node(let node):
+                return handle(node)
+            }
         }
+        .merge()
     }
 
     /// Just defining a simple enum because `Result.Failure` is required to sub-type `Error`.
@@ -139,25 +139,25 @@ public enum Kernel {
 
     /// Extract an attribute which is to translated directly to an `Expr`. If anything doesn't match, `Fail`.
     private static func requiredAttr<T>(
-        _ id: NodeId, _ node: NodeContent, _ attr: AttrName,
+        _ node: Node, _ attr: AttrName,
         expected: String,
         handle: (Value) -> T?)
     -> Either<Eval.Expr<Value>, T> {
-        switch node {
+        switch node.content {
         case .Attrs(let attrs):
             if let val = attrs[attr] {
                 if let expr = handle(val) {
                     return .right(expr)
                 }
                 else {
-                    return .left(.Fail(message: "Unexpected value for attribute \(attr) at node \(id): \(val)"))
+                    return .left(.Fail(message: "Unexpected value for attribute \(attr) at node \(node.id): \(val)"))
                 }
             }
             else {
-                return .left(.Fail(message: "Missing required attribute \(attr) at node \(id)"))
+                return .left(.Fail(message: "Missing required attribute \(attr) at node \(node.id)"))
             }
         default:
-            return .left(.Fail(message: "Missing required attribute \(attr) at node \(id)"))
+            return .left(.Fail(message: "Missing required attribute \(attr) at node \(node.id)"))
         }
     }
 
@@ -173,52 +173,55 @@ public enum Kernel {
     /// an expression that evaluates to the same value.
     /// Ordinary values are simply returned, but unevaluated functions and errors both get converted
     /// back to "expressions" that aren't very useful when evaluated.
-    static func repr(_ value: Eval.Value<Value>) -> Value {
+    static func repr(_ value: Eval.Value<Value>) -> Node {
         switch value {
+        case .Val(.Node(let node)):
+            return node
+
         case .Val(.Prim(let prim)):
             switch prim {
             case .Nil:
-                return .Node(id: freshNodeId(),
-                             type: Nil.type,
-                             content: .Empty)
+                return Node(id: freshNodeId(),
+                            type: Nil.type,
+                            content: .Empty)
 
             case .Bool(_):
-                return .Node(id: freshNodeId(),
-                             type: Bool_.type,
-                             content: .Attrs([Bool_.value: .Prim(prim)]))
+                return Node(id: freshNodeId(),
+                            type: Bool_.type,
+                            content: .Attrs([Bool_.value: .Prim(prim)]))
 
             case .Int(_):
-                return .Node(id: freshNodeId(),
-                             type: Int_.type,
-                             content: .Attrs([Int_.value: .Prim(prim)]))
+                return Node(id: freshNodeId(),
+                            type: Int_.type,
+                            content: .Attrs([Int_.value: .Prim(prim)]))
 
             case .String(_):
-                return .Node(id: freshNodeId(),
-                             type: String_.type,
-                             content: .Attrs([String_.value: .Prim(prim)]))
+                return Node(id: freshNodeId(),
+                            type: String_.type,
+                            content: .Attrs([String_.value: .Prim(prim)]))
             }
 
-        case .Val(.Node(_, _, _)):
-            switch value {
-            case .Val(let val):
-                return val
-            default:
-                fatalError("doesn't happen")  // because we literally just matched it as a .Node
-            }
+//        case .Val(.Node(let node)):
+//            switch value {
+//            case .Val(let val):
+//                return val
+//            default:
+//                fatalError("doesn't happen")  // because we literally just matched it as a .Node
+//            }
 
         case .Fn(let arity, _):
-            return .Node(id: freshNodeId(),
-                         type: Fn.type,
-                         content: .Attrs([
+            return Node(id: freshNodeId(),
+                        type: Fn.type,
+                        content: .Attrs([
                             Fn.arity: .Prim(.Int(arity))
-                         ]))
+                        ]))
 
         case .Error(let err):
-            return .Node(id: freshNodeId(),
-                         type: Error.type,
-                         content: .Attrs([
+            return Node(id: freshNodeId(),
+                        type: Error.type,
+                        content: .Attrs([
                             Error.description: .Prim(.String(String(describing: err)))
-                         ]))
+                        ]))
         }
     }
 

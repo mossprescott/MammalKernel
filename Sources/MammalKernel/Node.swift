@@ -57,10 +57,33 @@ public struct AttrName: Hashable {
     }
 }
 
-/// A value may be a primitive (leaf) or Node. Every node has an `id` and `type`, primitives do not.
+/// Every node has an `id`,  `type`, and some kind of content, which may be a collection of attributes,
+/// a sequence of nodes, a reference to another node, or nothing at all.
+public struct Node {
+    var id: NodeId
+    var type: NodeType
+    var content: Content
+
+    public enum Content {
+        /// An un-ordered collection of named attributes, each of which is a value/Node.
+        case Attrs([AttrName: Value])
+
+        /// An ordered list of children, each a Node.
+        case Elems([Node])
+
+        /// A reference to another Node.
+        case Ref(NodeId)
+
+        /// No contents; the node's meaning is carried entirely by its type. Note: this is here mostly
+        /// so you don't have to ask yourself whether an empty `Attrs` or `Elems` is appropriate.
+        case Empty
+    }
+}
+
+/// A value may be a Primitive (leaf) or Node.
 public enum Value {
     case Prim(Primitive)
-    case Node(id: NodeId, type: NodeType, content: NodeContent)
+    case Node(Node)
 }
 
 /// Primitive values which may appear as attributes/elements. Note: more primitives will be added as
@@ -71,23 +94,6 @@ public enum Primitive: Equatable {
     case Bool(Bool)
     case Int(Int)
     case String(String)
-}
-
-/// The content of a node may be a collection of attributes, a sequence of elements, a reference to
-/// another node, or nothing at all.
-public enum NodeContent {
-    /// An un-ordered collection of named attributes, each of which is a value/Node.
-    case Attrs([AttrName: Value])
-
-    /// An ordered list of children, each a value/Node.
-    case Elems([Value])
-
-    /// A reference to another Node.
-    case Ref(NodeId)
-
-    /// No contents; the node's meaning is carried entirely by its type. Note: this is here mostly
-    /// so you don't have to ask yourself whether an empty `Attrs` or `Elems` is appropriate.
-    case Empty
 }
 
 /// Check structural constraints:
@@ -103,9 +109,11 @@ public func checkWellFormedness(value: Value) -> Bool {
 // MARK: - Structural equality
 
 /// TODO: include NodeId or path or something as a location for each diff
-public enum ValueDelta: Equatable {
-    case primitivesDiffer(Primitive, Primitive)
+public enum NodeDelta: Equatable {
     case nodeTypesDiffer(NodeType, NodeType)
+    case primitivesDiffer(Primitive, Primitive)
+    case nodeReplacedPrimitive(Primitive, NodeType)
+    case primitiveReplacedNode(NodeType, Primitive)
     case attributeMissing(AttrName)
     case attributeAdded(AttrName)
     case elementMissing  // TODO: include what info?
@@ -113,43 +121,47 @@ public enum ValueDelta: Equatable {
     case contentTypesDiffer(String, String)  // TODO: what info, actually?
 }
 
-extension Value {
+extension Node {
     /// Compare two trees, ignoring ids but reporting all other differences.
     /// The value on the right is considered the "new" value: if it contains somethng thats not
     /// in the left value, the new thing is "added"; if the reverse, the thing is "missing"
-    public func diff(_ newValue: Value) -> [ValueDelta] {
-        switch (self, newValue) {
-        case (.Prim(let l), .Prim(let r)):
-            if l != r {
-                return [.primitivesDiffer(l, r)]
-            }
-            else {
-                return []
-            }
-        case (.Node(_, let lType, _), .Node(_, let rType, _))
-                where lType != rType:
-            return [.nodeTypesDiffer(lType, rType)]
-
-        case (.Node(_, _, let lContent), .Node(_, _, let rContent)):
-            switch (lContent, rContent) {
-
+    public func diff(_ newNode: Node) -> [NodeDelta] {
+        if self.type != newNode.type {
+            return [.nodeTypesDiffer(self.type, newNode.type)]
+        }
+        else {
+            switch (self.content, newNode.content) {
             case (.Attrs(let lAttrs), .Attrs(let rAttrs)):
                 let lNames = Set(lAttrs.keys)
                 let rNames = Set(rAttrs.keys)
                 let missing = Array(lNames.subtracting(rNames))
-                    .map { ValueDelta.attributeMissing($0) }
+                    .map { NodeDelta.attributeMissing($0) }
                 let added = Array(rNames.subtracting(lNames))
-                    .map { ValueDelta.attributeAdded($0) }
-                let children = Array(lNames.union(rNames)).flatMap { name in
-                    lAttrs[name]!.diff(rAttrs[name]!)
+                    .map { NodeDelta.attributeAdded($0) }
+                let children = Array(lNames.union(rNames)).flatMap { name -> [NodeDelta] in
+                    switch (lAttrs[name]!, rAttrs[name]!) {
+                    case (.Prim(let lPrim), .Prim(let rPrim)):
+                        if lPrim == rPrim {
+                            return []
+                        }
+                        else {
+                            return [.primitivesDiffer(lPrim, rPrim)]
+                        }
+                    case (.Node(let lNode), .Node(let rNode)):
+                        return lNode.diff(rNode)
+                    case (.Prim(let lPrim), .Node(let rNode)):
+                        return [.nodeReplacedPrimitive(lPrim, rNode.type)]
+                    case (.Node(let lNode), .Prim(let rPrim)):
+                        return [.primitiveReplacedNode(lNode.type, rPrim)]
+                    }
                 }
                 return missing + added + children
 
             case (.Elems(let lElems), .Elems(let rElems)):
                 // TODO: detect insertions and deletions, when some matching elements are present
-                let missing = Array(repeating: ValueDelta.elementMissing,
+                let missing = Array(repeating: NodeDelta.elementMissing,
                                     count: lElems.count - rElems.count)
-                let added = Array(repeating: ValueDelta.elementAdded,
+                let added = Array(repeating: NodeDelta.elementAdded,
                                   count: rElems.count - lElems.count)
                 let children = zip(lElems, rElems).flatMap { (l, r) in
                     l.diff(r)
@@ -157,13 +169,15 @@ extension Value {
                 return missing + added + children
 
             case (.Ref(let lTarget), .Ref(let rTarget)):
+                // Look up the referenced node in each tree. They need to be structurally equivalent,
+                // and maybe also appear in the same location in the tree.
                 fatalError("TODO")
 
             case (.Empty, .Empty):
                 return []
 
             case (_, _):
-                func contentType(_ content: NodeContent) -> String {
+                func contentType(_ content: Node.Content) -> String {
                     switch content {
                     case .Attrs(_): return "Attrs"
                     case .Elems(_): return "Elems"
@@ -171,11 +185,8 @@ extension Value {
                     case .Empty: return "Empty"
                     }
                 }
-                return [.contentTypesDiffer(contentType(lContent), contentType(rContent))]
+                return [.contentTypesDiffer(contentType(self.content), contentType(newNode.content))]
             }
-
-        case (_, _):
-            fatalError("what am I missing?")
         }
     }
 }
