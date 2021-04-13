@@ -37,21 +37,61 @@ public class KernelGen {
                      ]))
     }
 
-    public func Let(expr: Node, body: (() -> Node) -> Node) -> Node {
+    /// A function that, when called, generates a new Var referring to a certain Bind
+    public typealias VarGen = () -> Node
+
+    /// Make a Bind node and a generator for Vars that refer to it.
+    func bindGen() -> (Node, VarGen) {
         let bind = Node(idGen.generateId(),
                         Kernel.Bind.type,
                         .Empty)
-        func ref() -> Node {
-            Node(idGen.generateId(),
-                 Kernel.Var.type,
-                 .Ref(bind.id))
-        }
+        return (bind,
+                {
+                    Node(self.idGen.generateId(),
+                         Kernel.Var.type,
+                         .Ref(bind.id))
+                })
+    }
+
+    public func Let(expr: Node, body: (VarGen) -> Node) -> Node {
+        let (bind, ref) = bindGen()
         return Node(idGen.generateId(),
                     Kernel.Let.type,
                     .Attrs([
                         Kernel.Let.bind: .Node(bind),
                         Kernel.Let.expr: .Node(expr),
                         Kernel.Let.body: .Node(body(ref))
+                    ]))
+    }
+
+    public func Lambda(arity: Int, body: (VarGen, [VarGen]) -> Node) -> Node {
+        let lambdaId = idGen.generateId()
+        let params = Array(repeating: (), count: arity).map(bindGen)
+
+        return Node(lambdaId,
+                    Kernel.Lambda.type,
+                    .Attrs([
+                        Kernel.Lambda.params:
+                            .Node(Node(idGen.generateId(),
+                                       Kernel.Params.type,
+                                       .Elems(params.map { $0.0 }))),
+                        Kernel.Lambda.body:
+                            .Node(body({ () in
+                                        Node(idGen.generateId(),
+                                             Kernel.Var.type,
+                                             .Ref(lambdaId)) },
+                                       params.map { $0.1 }))
+                    ]))
+    }
+
+    public func App(fn: Node, args: [Node]) -> Node {
+        return Node(idGen.generateId(),
+                    Kernel.App.type,
+                    .Attrs([
+                        Kernel.App.fn: .Node(fn),
+                        Kernel.App.args: .Node(Node(idGen.generateId(),
+                                                    Kernel.Args.type,
+                                                    .Elems(args))),
                     ]))
     }
 

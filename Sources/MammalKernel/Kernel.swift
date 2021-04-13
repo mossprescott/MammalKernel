@@ -11,10 +11,11 @@ public enum Kernel {
     /// Evaluate/execute a program by translating it to the `Eval` AST, evaluating it, and
     /// then translating the resulting value back into a source-level representation.
     ///
-    /// TODO: some kind of "environment" which maps additional nodes to expressions, as well
-    /// as an actual `Environment` with values for eval0.
-    public static func eval(_ program: Node) throws -> Node {
-        let ast = translate(program)
+    /// - Parameter constants: A mapping giving additional node types, each of which is to be translated to
+    /// the provided literal value. This provides a mechanism to resolve references to values provided by the platform,
+    /// for example built-in functions.
+    public static func eval(_ program: Node, constants: [NodeType: Eval.Value<Node.Value>]) throws -> Node {
+        let ast = translate(program, constants: constants)
 
         let result = try Eval.eval(ast, env: .Empty)
 
@@ -33,7 +34,7 @@ public enum Kernel {
     ///
     /// If there are any structural errors, the resulting expression will fail (that is, produce an `Error` value
     /// when it's evaluated; if that portion of the program is never evaluated, no harm done.
-    static func translate(_ node: Node) -> Eval.Expr<Node.Value> {
+    static func translate(_ node: Node, constants: [NodeType: Eval.Value<Node.Value>]) -> Eval.Expr<Node.Value> {
         switch node.type {
         case Nil.type:
             return .Literal(.Prim(.Nil))
@@ -83,8 +84,8 @@ public enum Kernel {
                 }
             switch bindResult {
             case .right(let bindId):
-                let expr = requiredAttrToExpr(node, Let.expr, expected: "<Expr>", handle: translate)
-                let body = requiredAttrToExpr(node, Let.body, expected: "<Expr>", handle: translate)
+                let expr = requiredAttrToExpr(node, Let.expr) { translate($0, constants: constants) }
+                let body = requiredAttrToExpr(node, Let.body) { translate($0, constants: constants) }
                 return .Let(Eval.Name(id: bindId.id), expr: expr, body: body)
             case .left(let failExpr):
                 return failExpr
@@ -94,7 +95,26 @@ public enum Kernel {
             fatalError("TODO")
 
         case App.type:
-            fatalError("TODO")
+            let fn = requiredAttrToExpr(node, Kernel.App.fn) { translate($0, constants: constants) }
+            let args = requiredAttr(node, Kernel.App.args, expected: "<Exprs>") { val -> [Node]? in
+                switch val {
+                case .Node(let argsNode):
+                    switch argsNode.content {
+                    case .Elems(let argsChildren):
+                        return argsChildren
+                    default: return nil
+                    }
+                default:
+                    return nil
+                }
+
+            }
+            switch args {
+            case .left(let err):
+                return err
+            case .right(let argNodes):
+                return .App(fn: fn, args: argNodes.map { translate($0, constants: constants) })
+            }
 
         case Quote.type:
             fatalError("TODO")
@@ -103,20 +123,24 @@ public enum Kernel {
             fatalError("TODO")
 
         default:
-            return .Fail(message: "Unexpected node type: \(node.type)")
+            if let val = constants[node.type] {
+                return .RuntimeLiteral(val)
+            }
+            else {
+                return .Fail(message: "Unexpected node type: \(node.type)")
+            }
         }
     }
 
     /// Extract an attribute which is to be translated directly to an `Expr`. If anything doesn't match, `Fail`.
     private static func requiredAttrToExpr(
         _ node: Node, _ attr: AttrName,
-        expected: String,
         handle: (Node) -> Eval.Expr<Node.Value>?)
     -> Eval.Expr<Node.Value> {
-        requiredAttr(node, attr, expected: expected) { val -> Eval.Expr<Node.Value>? in
+        requiredAttr(node, attr, expected: "<Expr>") { val -> Eval.Expr<Node.Value>? in
             switch val {
-            case .Prim(let prim):
-                return .Fail(message: "Unexpected value for attribute \(attr) at node \(node.id); expected an expression, found primitive: \(prim)")
+            case .Prim(_):
+                return nil
             case .Node(let node):
                 return handle(node)
             }
@@ -150,7 +174,7 @@ public enum Kernel {
                     return .right(expr)
                 }
                 else {
-                    return .left(.Fail(message: "Unexpected value for attribute \(attr) at node \(node.id): \(val)"))
+                    return .left(.Fail(message: "Unexpected value for attribute \(attr) at node \(node.id); expected \(expected), found: \(val)"))
                 }
             }
             else {
