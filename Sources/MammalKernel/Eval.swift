@@ -61,6 +61,15 @@ public enum Eval {
         /// Evaluates to a fixed value.
         case Literal(_: T)
 
+        /// Evaluates to a fixed value, which may be a runtime function or error, not just an ordinary value.
+        ///
+        /// HACK: it makes life easier for the Kernel translator to be able to inject `.Fn` values directly — without generating an
+        /// id and injecting the value into the Environment — so for now this is helpful, but it feels like a wart when there's otherwise
+        /// no need for the `Value` type to appear in the AST.
+        ///
+        /// If this is a legitimate need, then probably `Literal` should just take this kind of `Value`.
+        case RuntimeLiteral(_: Value<T>)
+
         /// Looks up a value which has somehow been bound in the environment under a certain name.
         case Var(_: Name)
 
@@ -134,7 +143,7 @@ public enum Eval {
             }
         }
 
-        /// Consume a value that's expected _not_ to be a function. If it is, an error is thrown.
+        /// Consume a value that's expected _not_ to be a function or error. If it is, an error is thrown.
         public func withVal<U>(handle: (T) throws -> U) throws -> U {
             switch self {
             case .Val(let val):
@@ -236,6 +245,9 @@ public enum Eval {
         switch node {
         case .Literal(let val):
             return .Val(val)
+
+        case .RuntimeLiteral(let val):
+            return val
 
         case .Var(let name):
             if let val = env.lookup(name) {
