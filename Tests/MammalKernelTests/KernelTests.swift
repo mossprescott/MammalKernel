@@ -52,10 +52,46 @@ final class KernelTests: XCTestCase {
         XCTAssertEqual(Diff.changes(from: expected, to: result), [])
     }
 
+    /// Define a function, then just return it. Unfortunately, there's not much you can do with it after the evaluator exits.
+    func testLambda() throws {
+        // This is `const` (\ x y -> x), for what it's worth:
+        let pgm = gen.Lambda(arity: 2) { (_, args) in
+            return args[0]()
+        }
+
+        let expected = gen.Fn(arity: 2)
+
+        let result = try Kernel.eval(pgm, constants: [:])
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
+    }
+
+    /// Define and apply a function in a single expression: `let f(x, y) = x in f(42, 137)`
+    func testFunctionCall() throws {
+        let pgm = gen.Let(expr:
+                            gen.Lambda(arity: 2) { (_, args) in
+                                return args[0]()
+                            }) { f in
+            gen.App(fn: f(),
+                    args: [
+                        gen.Int(42),
+                        gen.Int(137),
+                    ])
+        }
+
+        let expected = gen.Int(42)
+
+        let result = try Kernel.eval(pgm, constants: [:])
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
+    }
+
     static var allTests = [
         ("testLiteral", testLiteral),
         ("testLet", testLet),
         ("testApp", testApp),
+        ("testLambda", testLambda),
+        ("testFunctionCall", testFunctionCall),
     ]
 
 

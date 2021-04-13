@@ -92,7 +92,28 @@ public enum Kernel {
             }
 
         case Lambda.type:
-            fatalError("TODO")
+            let params = requiredAttr(node, Kernel.Lambda.params, expected: "<Binds>") { val -> [Node]? in
+                switch val {
+                case .Node(let paramsNode):
+                    switch paramsNode.content {
+                    case .Elems(let paramsChildren):
+                        return paramsChildren
+                    default:
+                        return nil
+                    }
+                default:
+                    return nil
+                }
+            }
+            switch params {
+            case .left(let err):
+                return err
+            case .right(let paramNodes):
+                let body = requiredAttrToExpr(node, Kernel.Lambda.body) { translate($0, constants: constants) }
+                return .Lambda(Eval.Name(id: node.id.id),
+                               params: paramNodes.map { n in Eval.Name(id: n.id.id) },
+                               body: body)
+            }
 
         case App.type:
             let fn = requiredAttrToExpr(node, Kernel.App.fn) { translate($0, constants: constants) }

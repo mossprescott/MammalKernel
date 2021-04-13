@@ -95,7 +95,29 @@ public class KernelGen {
                     ]))
     }
 
-    // TODO: more special forms
+
+    // TODO: Quote
+
+    // TODO: Unquote
+    // TODO: UnquoteSplice
+
+    // TODO: Match
+
+    public func Fn(arity: Int) -> Node {
+        return Node(idGen.generateId(),
+                    Kernel.Fn.type,
+                    .Attrs([
+                        Kernel.Fn.arity: .Prim(.Int(arity))
+                    ]))
+    }
+
+    public func Error(description: String) -> Node {
+        return Node(idGen.generateId(),
+                    Kernel.Error.type,
+                    .Attrs([
+                        Kernel.Error.description: .Prim(.String(description))
+                    ]))
+    }
 }
 
 struct IdGen {
