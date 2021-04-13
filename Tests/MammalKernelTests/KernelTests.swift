@@ -33,12 +33,12 @@ final class KernelTests: XCTestCase {
     /// `plus(1, 2)`,  using a (fake) built-in addition function.
     func testApp() throws {
         let plusBuiltinType = NodeType("test-builtin", "(+)")
-        let plusFn = liftIntBinary { $0 + $1 }
+        let plusFn = liftIntBinary { .Prim(.Int($0 + $1)) }
         let builtin = [
             plusBuiltinType: plusFn,
         ]
 
-        let pgm = gen.App(fn: Node(NodeId(1001), plusBuiltinType, .Empty),
+        let pgm = gen.App(fn: gen.Constant(plusBuiltinType),
                           args: [
                             gen.Int(1),
                             gen.Int(2),
@@ -86,19 +86,68 @@ final class KernelTests: XCTestCase {
         XCTAssertEqual(Diff.changes(from: expected, to: result), [])
     }
 
+    ///
+    func testRecursiveLambda() throws {
+        let minusBuiltinType = NodeType("test-builtin", "(-)")
+        let minusFn = liftIntBinary { .Prim(.Int($0 - $1)) }
+        let timesBuiltinType = NodeType("test-builtin", "(*)")
+        let timesFn = liftIntBinary { .Prim(.Int($0 * $1)) }
+        let leBuiltinType = NodeType("test-builtin", "(<=)")
+        let leFn = liftIntBinary { .Prim(.Bool($0 <= $1)) }
+        let builtin = [
+            minusBuiltinType: minusFn,
+            timesBuiltinType: timesFn,
+            leBuiltinType: leFn,
+        ]
+
+        // fact(n) = case n <= 1 of
+        //             true -> 1
+        //             _ -> n * (n - 1)
+        let fact = gen.Lambda(arity: 1) { (rec, args) in
+            let n = args[0]
+            return gen.Match(expr: gen.App(fn: gen.Constant(leBuiltinType),
+                                           args: [
+                                            n(),
+                                            gen.Int(1),
+                                           ]),
+                             pattern: gen.Bool(true),
+                             body: gen.Int(1),
+                             otherwise: gen.App(fn: gen.Constant(timesBuiltinType),
+                                                args: [
+                                                    n(),
+                                                    gen.App(fn: rec(),
+                                                            args: [gen.App(fn: gen.Constant(minusBuiltinType),
+                                                                           args: [
+                                                                            n(),
+                                                                            gen.Int(1)
+                                                                           ])
+                                                            ])
+                                                ]))
+        }
+
+        let pgm = gen.App(fn: fact, args: [ gen.Int(5) ])
+
+        let expected = gen.Int(120)
+
+        let result = try Kernel.eval(pgm, constants: builtin)
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
+    }
+
     static var allTests = [
         ("testLiteral", testLiteral),
         ("testLet", testLet),
         ("testApp", testApp),
         ("testLambda", testLambda),
         ("testFunctionCall", testFunctionCall),
+        ("testRecursiveLambda", testRecursiveLambda),
     ]
 
 
 // MARK: - Common utility functions
 
     /// Lift a binary operator to a `Fn` value which will fail if its arguments aren't two ints.
-    func liftIntBinary(f: @escaping (Int, Int) -> Int) -> Eval.Value<Node.Value> {
+    func liftIntBinary(f: @escaping (Int, Int) -> Node.Value) -> Eval.Value<Node.Value> {
         Eval.Value<Node.Value>.Fn(arity: 2) { args in
             guard args.count == 2 else {
                 throw Eval.RuntimeError.ArityError(expected: 2, found: args)
@@ -120,7 +169,7 @@ final class KernelTests: XCTestCase {
                 return .Error(Eval.RuntimeError.TypeError(expected: "Int", found: args[1]))
             }
 
-            return .Val(.Prim(.Int(f(x, y))))
+            return .Val(f(x, y))
         }
     }
 

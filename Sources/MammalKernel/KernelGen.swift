@@ -95,13 +95,40 @@ public class KernelGen {
                     ]))
     }
 
+    public func Quote(body: Node) -> Node {
+        return Node(idGen.generateId(),
+                    Kernel.Quote.type,
+                    .Attrs([
+                        Kernel.Quote.body: .Node(body),
+                            ]))
+    }
 
-    // TODO: Quote
+    public func Unquote(expr: Node) -> Node {
+        return Node(idGen.generateId(),
+                    Kernel.Unquote.type,
+                    .Attrs([
+                        Kernel.Unquote.expr: .Node(expr),
+                            ]))
+    }
 
-    // TODO: Unquote
-    // TODO: UnquoteSplice
+    public func UnquoteSplice(expr: Node) -> Node {
+        return Node(idGen.generateId(),
+                    Kernel.UnquoteSplice.type,
+                    .Attrs([
+                        Kernel.UnquoteSplice.expr: .Node(expr),
+                            ]))
+    }
 
-    // TODO: Match
+    public func Match(expr: Node, pattern: Node, body: Node, otherwise: Node) -> Node {
+        return Node(idGen.generateId(),
+                    Kernel.Match.type,
+                    .Attrs([
+                        Kernel.Match.expr: .Node(expr),
+                        Kernel.Match.pattern: .Node(pattern),
+                        Kernel.Match.body: .Node(body),
+                        Kernel.Match.otherwise: .Node(otherwise),
+                    ]))
+    }
 
     public func Fn(arity: Int) -> Node {
         return Node(idGen.generateId(),
@@ -117,6 +144,11 @@ public class KernelGen {
                     .Attrs([
                         Kernel.Error.description: .Prim(.String(description))
                     ]))
+    }
+
+    /// An empty node with the given type, which will usually refer to a "constant" (i.e. a builtin).
+    public func Constant(_ type: NodeType) -> Node {
+        return Node(idGen.generateId(), type, .Empty)
     }
 }
 

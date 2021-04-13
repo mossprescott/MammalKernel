@@ -35,6 +35,8 @@ public enum Kernel {
     /// If there are any structural errors, the resulting expression will fail (that is, produce an `Error` value
     /// when it's evaluated; if that portion of the program is never evaluated, no harm done.
     static func translate(_ node: Node, constants: [NodeType: Eval.Value<Node.Value>]) -> Eval.Expr<Node.Value> {
+        let translateChild = { translate($0, constants: constants) }
+
         switch node.type {
         case Nil.type:
             return .Literal(.Prim(.Nil))
@@ -84,8 +86,8 @@ public enum Kernel {
                 }
             switch bindResult {
             case .right(let bindId):
-                let expr = requiredAttrToExpr(node, Let.expr) { translate($0, constants: constants) }
-                let body = requiredAttrToExpr(node, Let.body) { translate($0, constants: constants) }
+                let expr = requiredAttrToExpr(node, Let.expr, handle: translateChild)
+                let body = requiredAttrToExpr(node, Let.body, handle: translateChild)
                 return .Let(Eval.Name(id: bindId.id), expr: expr, body: body)
             case .left(let failExpr):
                 return failExpr
@@ -109,14 +111,14 @@ public enum Kernel {
             case .left(let err):
                 return err
             case .right(let paramNodes):
-                let body = requiredAttrToExpr(node, Kernel.Lambda.body) { translate($0, constants: constants) }
+                let body = requiredAttrToExpr(node, Kernel.Lambda.body, handle: translateChild)
                 return .Lambda(Eval.Name(id: node.id.id),
                                params: paramNodes.map { n in Eval.Name(id: n.id.id) },
                                body: body)
             }
 
         case App.type:
-            let fn = requiredAttrToExpr(node, Kernel.App.fn) { translate($0, constants: constants) }
+            let fn = requiredAttrToExpr(node, Kernel.App.fn, handle: translateChild)
             let args = requiredAttr(node, Kernel.App.args, expected: "<Exprs>") { val -> [Node]? in
                 switch val {
                 case .Node(let argsNode):
@@ -141,7 +143,41 @@ public enum Kernel {
             fatalError("TODO")
 
         case Match.type:
-            fatalError("TODO")
+            let expr = requiredAttrToExpr(node, Match.expr, handle: translateChild)
+            let body = requiredAttrToExpr(node, Match.body, handle: translateChild)
+            let otherwise = requiredAttrToExpr(node, Match.otherwise, handle: translateChild)
+
+            // The pattern is always interpreted as if quoted. It is not evaluated in the
+            // usual way, but only compared to the value of expr.
+            // TODO: search for embedded, unquoted Bind nodes.
+            // TODO: what if some other unquoted expression is embedded? There seems to be no
+            //   compelling reason not to evaluate it and then match against it. Well, except that
+            //   it could get complicated.
+            switch requiredAttr(node, Match.pattern, expected: "<pattern>", handle: { val -> Node? in
+                switch val {
+                case .Node(let node): return node
+                default: return nil
+                }
+            }) {
+            case .left(let err):
+                return err
+
+            case .right(let pattern):
+                let bindings = findBindings(inPattern: pattern)
+
+                return .Match(expr: expr,
+                              bindings: bindings.map { Eval.Name(id: $0.id) },
+                              body: body,
+                              otherwise: otherwise) { rv in
+                                switch rv {
+                                case .Val(let val):
+                                    return matchAndBind(pattern: pattern,
+                                                        withValue: val)
+                                default:
+                                    return .NoMatch
+                                }
+                              }
+            }
 
         default:
             if let val = constants[node.type] {
@@ -210,6 +246,32 @@ public enum Kernel {
 
 
 // MARK: - Pattern matching
+
+    /// Search a node which appears as the pattern in a Match expression. The bindings are Bind nodes which appear as the direct
+    /// children of Unquote nodes at level 0 within the pattern.
+    static func findBindings(inPattern: Node) -> [NodeId] {
+        // TODO: actually search
+
+        return []
+    }
+
+    /// Compare the node which appears as the pattern in a Match expression with a value that arises at runtime. If the value is a
+    /// match, then also extract the value for each binding that appears in the pattern.
+    static func matchAndBind(pattern: Node, withValue runtimeValue: Node.Value) -> Eval.MatchResult<Node.Value> {
+        // Convert back to source representation:
+        let rtNode = repr(.Val(runtimeValue))
+
+        // TODO: actually compare the pattern in a meaningful way, capture bound values, and ignore
+        // unbound values.
+
+        // HACK: this will work for simple literal values and even exact node matches:
+        if Diff.changes(from: pattern, to: rtNode) == [] {
+            return .Matched([])
+        }
+        else {
+            return .NoMatch
+        }
+    }
 
 
 // MARK: - Reverse translation, aka "repr", aka "print"
@@ -293,8 +355,6 @@ public enum Kernel {
 
     public enum Var {
         public static let type = NodeType("kernel", "var")
-        /// A Ref node pointing to the node that binds the variable.
-//        public static let ref = AttrName(type, "ref")
     }
 
     public enum Let {
