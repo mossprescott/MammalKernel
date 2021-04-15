@@ -91,9 +91,8 @@ public enum Eval {
         case App(fn: Expr, args: [Expr])
 
         /// Expands a partially-constructed value, which may involve sub-expressions which need to be
-        /// evaluated in the current scope. The result of expansion is a new expression which is then
-        /// evaluated.
-        case Quote(expand: (EvalInContext<T>) throws -> Expr)
+        /// evaluated in the current scope. 
+        case Quote(expand: (EvalInContext<T>) throws -> Value<T>)
 
         /// Attempts to match the value of an expression against some externally-defined pattern. If the
         /// match succeeds, it produces a value for each binding, and `body` is evaluated with them in scope.
@@ -285,10 +284,9 @@ public enum Eval {
             }
 
         case .Quote(let expand):
-            let splice = try expand { expr in
+            return try expand { expr in
                 try eval(expr, env: env)
             }
-            return try eval(splice, env: env)
 
         case .Match(let expr, let bindings, let body, let otherwise, let match):
             let value = try eval(expr, env: env)

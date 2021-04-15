@@ -85,7 +85,7 @@ final class EvalTests: XCTestCase {
     func testQuote() throws {
         let env = Eval.Environment<Int>.Empty
 
-        let prg = Eval.Expr<Int>.Quote(expand: { _ in .Literal(1) })
+        let prg = Eval.Expr<Int>.Quote(expand: { _ in .Val(1) })
 
         let result = try Eval.eval(prg, env: env)
         XCTAssertTrue(result.isVal(1))
@@ -100,7 +100,7 @@ final class EvalTests: XCTestCase {
         let prg = Eval.Expr<Int>.Quote(expand: { eval in
             let er = try eval(.Var(x))
             return try er.withVal { val in
-                .Literal(val + 2)
+                .Val(val + 2)
             }
         })
 
