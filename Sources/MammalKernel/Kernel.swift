@@ -140,7 +140,12 @@ public enum Kernel {
             }
 
         case Quote.type:
-            fatalError("TODO")
+            return requiredAttrToExpr(node, Quote.body) { node in
+                .Quote { try expandQuotedNode(node, constants: constants, eval: $0) }
+            }
+
+        case Unquote.type, UnquoteSplice.type:
+            return .Fail(message: "Unquote without enclosing Quote at node \(node.id)")
 
         case Match.type:
             let expr = requiredAttrToExpr(node, Match.expr, handle: translateChild)
@@ -218,7 +223,8 @@ public enum Kernel {
         }
     }
 
-    /// Extract an attribute which is to translated directly to an `Expr`. If anything doesn't match, `Fail`.
+    /// Extract an attribute an attempt to translate it to some value, returning either the result or a `Fail`
+    /// describing what went wrong.
     private static func requiredAttr<T>(
         _ node: Node, _ attr: AttrName,
         expected: String,
@@ -238,12 +244,77 @@ public enum Kernel {
                 return .left(.Fail(message: "Missing required attribute \(attr) at node \(node.id)"))
             }
         default:
-            return .left(.Fail(message: "Missing required attribute \(attr) at node \(node.id)"))
+            return .left(.Fail(message: "Missing required attribute \(attr) at node \(node.id) (no attributes present)"))
         }
     }
 
 // MARK: - Quotation
 
+    /// Expand a node which appeared inside a `Quote` node's body, in a particular environment during evaluation.
+    /// The structure of the node is inspected: if it is an `Unquote`, its `expr` is evaluated and substituted. Otherwise any child
+    /// nodes are subjected to the same scrutiny.
+    ///
+    /// Note: this function gets called during evaluation, and in turn calls back into the evaluator,
+    /// so it can throw RuntimeError, in keeping with the way those errors are currently handled.
+    static func expandQuotedNode(_ node: Node,
+                                 constants: [NodeType: Eval.Value<Node.Value>],
+                                 eval: Eval.EvalInContext<Node.Value>)
+                                        throws -> Eval.Value<Node.Value> {
+        if node.type == Unquote.type {
+            return try eval(requiredAttrToExpr(node, Unquote.expr) { expr in
+                translate(expr, constants: constants)
+            })
+        }
+        else {
+            func expandChildNode(_ child: Node) throws -> Node.Value {
+                let expandedVal = try expandQuotedNode(child, constants: constants, eval: eval)
+                switch expandedVal {
+                case .Val(let expandedChild):
+                    return expandedChild
+                case .Fn(_, _):
+                    throw Eval.RuntimeError.TypeError(expected: "normal value during quote expansion",
+                                                      found: expandedVal)
+                case .Error(let err):
+                    throw err
+                }
+            }
+
+            switch node.content {
+            case .Attrs(let attrs):
+                let expandedAttrs = try attrs.mapValues { val throws -> Node.Value in
+                    switch val {
+                    case .Prim(_): return val
+                    case .Node(let child): return try expandChildNode(child)
+                    }
+                }
+                return .Val(.Node(Node(node.id, node.type, .Attrs(expandedAttrs))))
+
+            case .Elems(let elems):
+                // TODO: handle UnquoteSplice. Need some kind of list type in Kernel?
+
+                let expandedElems = try elems.map { child throws -> Node in
+                    switch try expandChildNode(child) {
+                    case .Prim(let expandedVal):
+                        throw Eval.RuntimeError<Node.Value>.TypeError(
+                            expected: "node for Elems during quote expansion",
+                            found: .Val(.Prim(expandedVal)))
+                    case .Node(let expandedChild):
+                        return expandedChild
+                    }
+                }
+
+                return .Val(.Node(Node(node.id, node.type, .Elems(expandedElems))))
+
+            case .Ref(_):
+                // TODO: verify that the ref points to a node within the quotation?
+                // TODO: re-label nodes to avoid collisions
+                return .Val(.Node(node))
+
+            case .Empty:
+                return .Val(.Node(node))
+            }
+        }
+    }
 
 // MARK: - Pattern matching
 

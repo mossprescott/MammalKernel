@@ -134,6 +134,69 @@ final class KernelTests: XCTestCase {
         XCTAssertEqual(Diff.changes(from: expected, to: result), [])
     }
 
+    func testQuoteTrivial() throws {
+        let body = gen.Constant(NodeType("test-example", "foo"))
+
+        let pgm = gen.Quote(body: body)
+
+        let expected = body
+
+        let result = try Kernel.eval(pgm, constants: [:])
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
+    }
+
+    func testQuoteSingleUnquote() throws {
+        let pgm = gen.Quote(body:
+                                gen.Unquote(expr:
+                                                gen.Int(42)))
+
+        let expected = gen.Int(42)
+
+        let result = try Kernel.eval(pgm, constants: [:])
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
+    }
+
+    /// Construct a node by pulling a couple of values which are provided as evaluation-time constants.
+    func testQuoteAttrPrimitives() throws {
+        let personType = NodeType("test-example", "person")
+        let nameAttr = AttrName(personType, "name")
+        let ageAttr = AttrName(personType, "age")
+
+        let nameConstantType = NodeType("test-builtin", "name")
+        let nameConstantValue: Eval.Value<Node.Value> = .Val(.Prim(.String("Steve")))
+        let ageConstantType = NodeType("test-builtin", "age")
+        let ageConstantValue: Eval.Value<Node.Value> = .Val(.Prim(.Int(42)))
+        let builtin = [
+            nameConstantType: nameConstantValue,
+            ageConstantType: ageConstantValue,
+        ]
+
+        let pgm = gen.Quote(body:
+                                Node(NodeId(1000),
+                                     personType,
+                                     .Attrs([
+                                        nameAttr:
+                                            .Node(gen.Unquote(expr: gen.Constant(nameConstantType))),
+                                        ageAttr:
+                                            .Node(gen.Unquote(expr: gen.Constant(ageConstantType))),
+                                     ])))
+
+        let expected = Node(NodeId(2000),
+                            personType,
+                            .Attrs([
+                                nameAttr: .Prim(.String("Steve")),
+                                ageAttr: .Prim(.Int(42)),
+                            ]))
+
+        let result = try Kernel.eval(pgm, constants: builtin)
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
+    }
+
+// TODO: error cases
+
     static var allTests = [
         ("testLiteral", testLiteral),
         ("testLet", testLet),
@@ -141,6 +204,9 @@ final class KernelTests: XCTestCase {
         ("testLambda", testLambda),
         ("testFunctionCall", testFunctionCall),
         ("testRecursiveLambda", testRecursiveLambda),
+        ("testQuoteTrivial", testQuoteTrivial),
+        ("testQuoteSingleUnquote", testQuoteSingleUnquote),
+        ("testQuoteAttrPrimitives", testQuoteAttrPrimitives),
     ]
 
 
