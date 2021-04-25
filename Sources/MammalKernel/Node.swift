@@ -60,9 +60,9 @@ public struct AttrName: Hashable {
 /// Every node has an `id`,  `type`, and some kind of content, which may be a collection of attributes,
 /// a sequence of nodes, a reference to another node, or nothing at all.
 public struct Node {
-    var id: NodeId
-    var type: NodeType
-    var content: Content
+    public var id: NodeId
+    public var type: NodeType
+    public var content: Content
 
     public enum Content {
         /// An un-ordered collection of named attributes, each of which is a value/Node.

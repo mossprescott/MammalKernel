@@ -3,7 +3,7 @@
 /// Utility for constructing Kernel language programs in code. This is useful for tests. Once a proper editor exists, there will be less need
 /// for this sort of thing.
 public class KernelGen {
-    var idGen = IdGen()
+    let idGen = IdGen.Shared
 
     public init() {}
 
@@ -40,8 +40,9 @@ public class KernelGen {
     /// A function that, when called, generates a new Var referring to a certain Bind
     public typealias VarGen = () -> Node
 
-    /// Make a Bind node and a generator for Vars that refer to it.
-    func bindGen() -> (Node, VarGen) {
+    /// Make a Bind node and a generator for Vars that refer to it. Note: `Let` and `Lambda` take care of this for you, but the
+    /// individual parts might be needed for constructing patterns.
+    public func bindGen() -> (Node, VarGen) {
         let bind = Node(idGen.generateId(),
                         Kernel.Bind.type,
                         .Empty)
@@ -149,15 +150,5 @@ public class KernelGen {
     /// An empty node with the given type, which will usually refer to a "constant" (i.e. a builtin).
     public func Constant(_ type: NodeType) -> Node {
         return Node(idGen.generateId(), type, .Empty)
-    }
-}
-
-struct IdGen {
-    var nextId = 0
-
-    mutating func generateId() -> NodeId {
-        let id = NodeId(nextId)
-        nextId += 1
-        return id
     }
 }

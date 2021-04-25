@@ -42,7 +42,7 @@ public enum Kernel {
             return .Literal(.Prim(.Nil))
 
         case Bool_.type:
-            return requiredAttr(node, Bool_.value, expected: "Bool") { val in
+            return required(node, Bool_.value, expected: "Bool") { val in
                 switch val {
                 case .Prim(.Bool(_)): return .Literal(val)
                 default: return nil
@@ -50,7 +50,7 @@ public enum Kernel {
             }.merge()
 
         case Int_.type:
-            return requiredAttr(node, Int_.value, expected: "Int") { val in
+            return required(node, Int_.value, expected: "Int") { val in
                 switch val {
                 case .Prim(.Int(_)): return .Literal(val)
                 default: return nil
@@ -58,7 +58,7 @@ public enum Kernel {
             }.merge()
 
         case String_.type:
-            return requiredAttr(node, String_.value, expected: "String") { val in
+            return required(node, String_.value, expected: "String") { val in
                 switch val {
                 case .Prim(.String(_)): return .Literal(val)
                 default: return nil
@@ -76,7 +76,7 @@ public enum Kernel {
 
         case Let.type:
             let bindResult: Either<Eval.Expr<Node.Value>, NodeId> =
-                requiredAttr(node, Let.bind, expected: "Bind") { val in
+                required(node, Let.bind, expected: "Bind") { val in
                     switch val {
                     case .Node(let bindNode) where bindNode.type == Bind.type:
                         return bindNode.id
@@ -86,15 +86,15 @@ public enum Kernel {
                 }
             switch bindResult {
             case .right(let bindId):
-                let expr = requiredAttrToExpr(node, Let.expr, handle: translateChild)
-                let body = requiredAttrToExpr(node, Let.body, handle: translateChild)
+                let expr = requiredExpr(node, Let.expr, handle: translateChild)
+                let body = requiredExpr(node, Let.body, handle: translateChild)
                 return .Let(Eval.Name(id: bindId.id), expr: expr, body: body)
             case .left(let failExpr):
                 return failExpr
             }
 
         case Lambda.type:
-            let params = requiredAttr(node, Kernel.Lambda.params, expected: "<Binds>") { val -> [Node]? in
+            let params = required(node, Kernel.Lambda.params, expected: "<Binds>") { val -> [Node]? in
                 switch val {
                 case .Node(let paramsNode):
                     switch paramsNode.content {
@@ -111,15 +111,15 @@ public enum Kernel {
             case .left(let err):
                 return err
             case .right(let paramNodes):
-                let body = requiredAttrToExpr(node, Kernel.Lambda.body, handle: translateChild)
+                let body = requiredExpr(node, Kernel.Lambda.body, handle: translateChild)
                 return .Lambda(Eval.Name(id: node.id.id),
                                params: paramNodes.map { n in Eval.Name(id: n.id.id) },
                                body: body)
             }
 
         case App.type:
-            let fn = requiredAttrToExpr(node, Kernel.App.fn, handle: translateChild)
-            let args = requiredAttr(node, Kernel.App.args, expected: "<Exprs>") { val -> [Node]? in
+            let fn = requiredExpr(node, Kernel.App.fn, handle: translateChild)
+            let args = required(node, Kernel.App.args, expected: "<Exprs>") { val -> [Node]? in
                 switch val {
                 case .Node(let argsNode):
                     switch argsNode.content {
@@ -140,7 +140,7 @@ public enum Kernel {
             }
 
         case Quote.type:
-            return requiredAttrToExpr(node, Quote.body) { node in
+            return requiredExpr(node, Quote.body) { node in
                 .Quote { try expandQuotedNode(node, constants: constants, eval: $0) }
             }
 
@@ -148,9 +148,9 @@ public enum Kernel {
             return .Fail(message: "Unquote without enclosing Quote at node \(node.id)")
 
         case Match.type:
-            let expr = requiredAttrToExpr(node, Match.expr, handle: translateChild)
-            let body = requiredAttrToExpr(node, Match.body, handle: translateChild)
-            let otherwise = requiredAttrToExpr(node, Match.otherwise, handle: translateChild)
+            let expr = requiredExpr(node, Match.expr, handle: translateChild)
+            let body = requiredExpr(node, Match.body, handle: translateChild)
+            let otherwise = requiredExpr(node, Match.otherwise, handle: translateChild)
 
             // The pattern is always interpreted as if quoted. It is not evaluated in the
             // usual way, but only compared to the value of expr.
@@ -158,7 +158,7 @@ public enum Kernel {
             // TODO: what if some other unquoted expression is embedded? There seems to be no
             //   compelling reason not to evaluate it and then match against it. Well, except that
             //   it could get complicated.
-            switch requiredAttr(node, Match.pattern, expected: "<pattern>", handle: { val -> Node? in
+            switch required(node, Match.pattern, expected: "<pattern>", handle: { val -> Node? in
                 switch val {
                 case .Node(let node): return node
                 default: return nil
@@ -194,59 +194,30 @@ public enum Kernel {
         }
     }
 
-    /// Extract an attribute which is to be translated directly to an `Expr`. If anything doesn't match, `Fail`.
-    private static func requiredAttrToExpr(
+    /// Extract an attribute which is to be translated in some way. If it's missing, or if the translation fails, then `Fail`.
+    private static func required<T>(
         _ node: Node, _ attr: AttrName,
-        handle: (Node) -> Eval.Expr<Node.Value>?)
-    -> Eval.Expr<Node.Value> {
-        requiredAttr(node, attr, expected: "<Expr>") { val -> Eval.Expr<Node.Value>? in
+        expected: String, handle: (Node.Value) -> T?
+    ) -> Either<Eval.Expr<Node.Value>, T> {
+        requiredAttr(node, attr, expected: expected, handle: handle)
+            .mapLeft { .Fail(message: $0) }
+    }
+
+    /// Extract an attribute which is to be translated directly to an `Expr`. If anything doesn't match, `Fail`.
+    private static func requiredExpr(
+        _ node: Node, _ attr: AttrName,
+        handle: (Node) -> Eval.Expr<Node.Value>?
+    )  -> Eval.Expr<Node.Value> {
+        required(node, attr, expected: "<Expr>") { val -> Eval.Expr<Node.Value>? in
             switch val {
             case .Prim(_):
                 return nil
             case .Node(let node):
                 return handle(node)
             }
-        }
-        .merge()
+        }.merge()
     }
 
-    /// Just defining a simple enum because `Result.Failure` is required to sub-type `Error`.
-    private enum Either<Left, Right> {
-        case left(Left)
-        case right(Right)
-
-        func merge() -> Left where Left == Right {
-            switch self {
-            case .left(let val): return val
-            case .right(let val): return val
-            }
-        }
-    }
-
-    /// Extract an attribute an attempt to translate it to some value, returning either the result or a `Fail`
-    /// describing what went wrong.
-    private static func requiredAttr<T>(
-        _ node: Node, _ attr: AttrName,
-        expected: String,
-        handle: (Node.Value) -> T?)
-    -> Either<Eval.Expr<Node.Value>, T> {
-        switch node.content {
-        case .Attrs(let attrs):
-            if let val = attrs[attr] {
-                if let expr = handle(val) {
-                    return .right(expr)
-                }
-                else {
-                    return .left(.Fail(message: "Unexpected value for attribute \(attr) at node \(node.id); expected \(expected), found: \(val)"))
-                }
-            }
-            else {
-                return .left(.Fail(message: "Missing required attribute \(attr) at node \(node.id)"))
-            }
-        default:
-            return .left(.Fail(message: "Missing required attribute \(attr) at node \(node.id) (no attributes present)"))
-        }
-    }
 
 // MARK: - Quotation
 
@@ -261,7 +232,7 @@ public enum Kernel {
                                  eval: Eval.EvalInContext<Node.Value>)
                                         throws -> Eval.Value<Node.Value> {
         if node.type == Unquote.type {
-            return try eval(requiredAttrToExpr(node, Unquote.expr) { expr in
+            return try eval(requiredExpr(node, Unquote.expr) { expr in
                 translate(expr, constants: constants)
             })
         }
