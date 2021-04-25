@@ -154,10 +154,9 @@ public enum Kernel {
 
             // The pattern is always interpreted as if quoted. It is not evaluated in the
             // usual way, but only compared to the value of expr.
-            // TODO: search for embedded, unquoted Bind nodes.
-            // TODO: what if some other unquoted expression is embedded? There seems to be no
-            //   compelling reason not to evaluate it and then match against it. Well, except that
-            //   it could get complicated.
+            // TODO: what if an unquoted expression is embedded? There seems to be no
+            // compelling reason not to evaluate it and then match against it. Well, except that
+            // it could get complicated.
             switch required(node, Match.pattern, expected: "<pattern>", handle: { val -> Node? in
                 switch val {
                 case .Node(let node): return node
@@ -289,12 +288,34 @@ public enum Kernel {
 
 // MARK: - Pattern matching
 
-    /// Search a node which appears as the pattern in a Match expression. The bindings are Bind nodes which appear as the direct
-    /// children of Unquote nodes at level 0 within the pattern.
-    static func findBindings(inPattern: Node) -> [NodeId] {
-        // TODO: actually search
+    /// Search a node which appears as the pattern in a Match expression. For the time being, the bindings are just any Bind nodes.
+    /// No special handling of Quote and Ref nodes, which is very possibly wrong.
+    static func findBindings(inPattern node: Node) -> [NodeId] {
+        if node.type == Kernel.Bind.type {
+            return [node.id]
+        }
+        else {
+            switch node.content {
+            case .Attrs(let attrs):
+                return attrs.values.flatMap { val -> [NodeId] in
+                    switch val {
+                    case .Prim(_):
+                        return []
+                    case .Node(let child):
+                        return findBindings(inPattern: child)
+                    }
+                }
 
-        return []
+            case .Elems(let elems):
+                return elems.flatMap(findBindings)
+
+            case .Ref(_):
+                return []
+
+            case .Empty:
+                return []
+            }
+        }
     }
 
     /// Compare the node which appears as the pattern in a Match expression with a value that arises at runtime. If the value is a
@@ -303,16 +324,87 @@ public enum Kernel {
         // Convert back to source representation:
         let rtNode = repr(.Val(runtimeValue))
 
-        // TODO: actually compare the pattern in a meaningful way, capture bound values, and ignore
-        // unbound values.
+        // Find the bindings again, so we can assemble values in the same order.
+        // Note: this assumes findBindings is deterministic.
+        let bindings = findBindings(inPattern: pattern)
 
-        // HACK: this will work for simple literal values and even exact node matches:
-        if Diff.changes(from: pattern, to: rtNode) == [] {
-            return .Matched([])
+        func loop(patternNode: Node, valueNode: Node) -> [NodeId: Node.Value]? {
+            // This will handle the case of a bind at the root:
+            if patternNode.type == Kernel.Bind.type {
+                return [patternNode.id: .Node(valueNode)]
+            }
+
+            guard patternNode.type == valueNode.type else {
+                return nil
+            }
+
+            switch (patternNode.content, valueNode.content) {
+            case (.Attrs(let patternAttrs), .Attrs(let valueAttrs)):
+                // TODO: accumulate with a functional loop and banish `var`
+                var childBindings: [NodeId: Node.Value] = [:]
+
+                // Note: extra attributes in the value are ignored.
+                for (attr, patternVal) in patternAttrs {
+                    if let valueVal = valueAttrs[attr] {
+                        switch (patternVal, valueVal) {
+
+                        // This catches binding .Prim as well as .Node.
+                        // TODO: normalize the same representation?
+                        case (.Node(let pb), _) where pb.type == Kernel.Bind.type:
+                            childBindings[pb.id] = valueVal
+
+                        case (.Prim(let pp), .Prim(let vp)):
+                            if vp == pp {
+                                return [:]
+                            }
+                            else {
+                                return nil
+                            }
+                        case (.Node(let pc), .Node(let vc)):
+                            guard let newChildBindings = loop(patternNode: pc, valueNode: vc) else {
+                                return nil
+                            }
+
+                            childBindings.merge(newChildBindings,
+                                                uniquingKeysWith: { _,_ in fatalError("Duplicate binding ids") })
+                        default:
+                            return nil
+                        }
+                    }
+                }
+
+                return childBindings
+
+            case (.Elems(let patternElems), .Elems(let valueElems)):
+                fatalError("TODO")
+
+            case (.Ref(_), .Ref(_)):
+                // TODO: Hmm... 🤯
+                fatalError("TODO")
+
+            case (.Empty, .Empty):
+                return [:]
+
+            default:
+                return nil
+            }
+        }
+
+        if let bound = loop(patternNode: pattern, valueNode: rtNode),
+           bindings.allSatisfy({ id in bound.keys.contains(id) }) {
+            return .Matched(bindings.map { id in .Val(bound[id]!) })
         }
         else {
             return .NoMatch
         }
+
+//        // HACK: this will work for simple literal values and even exact node matches:
+//        if Diff.changes(from: pattern, to: rtNode) == [] {
+//            return .Matched([])
+//        }
+//        else {
+//            return .NoMatch
+//        }
     }
 
 

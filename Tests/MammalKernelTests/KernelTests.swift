@@ -195,6 +195,68 @@ final class KernelTests: XCTestCase {
         XCTAssertEqual(Diff.changes(from: expected, to: result), [])
     }
 
+    func testMatchTrivial() throws {
+        let pgm = gen.Match(expr: gen.Int(42),
+                            pattern: gen.Int(42),
+                            body: gen.Bool(true),
+                            otherwise: gen.Bool(false))
+
+        let expected = gen.Bool(true)
+
+        let result = try Kernel.eval(pgm, constants: [:])
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
+    }
+
+    func testMatchTrivialNoMatch() throws {
+        let pgm = gen.Match(expr: gen.Int(42),
+                            pattern: gen.Int(43),
+                            body: gen.Bool(true),
+                            otherwise: gen.Bool(false))
+
+        let expected = gen.Bool(false)
+
+        let result = try Kernel.eval(pgm, constants: [:])
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
+    }
+
+    // TODO: sort out exactly how Bind nodes get (un)quoted within patterns.
+    // How do you match a Bind?
+    func testMatchBindAttr() throws {
+        let (valBind, valRef) = gen.bindGen()
+
+        let fooType = NodeType("test", "foo")
+        let barAttr = AttrName(fooType, "bar")
+
+        // case `foo { bar: 42 }` of
+        //   foo { bar: x } -> x
+        //   _ -> nil
+        let pgm = gen.Match(expr: gen.Quote(body:
+                                                Node(IdGen.Shared.generateId(),
+                                                     fooType,
+                                                     .Attrs([
+                                                        barAttr:
+                                                            .Prim(.Int(42))
+                                                     ]))),
+                            pattern:
+                                Node(IdGen.Shared.generateId(),
+                                     fooType,
+                                     .Attrs([
+                                        barAttr:
+                                            .Node(valBind)
+                                     ])),
+                            body: valRef(),
+                            otherwise: gen.Nil())
+
+        let expected = gen.Int(42)
+
+        let result = try Kernel.eval(pgm, constants: [:])
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
+    }
+
+
 // TODO: error cases
 
     static var allTests = [
@@ -207,6 +269,10 @@ final class KernelTests: XCTestCase {
         ("testQuoteTrivial", testQuoteTrivial),
         ("testQuoteSingleUnquote", testQuoteSingleUnquote),
         ("testQuoteAttrPrimitives", testQuoteAttrPrimitives),
+        ("testMatchTrivial", testMatchTrivial),
+        ("testMatchTrivialNoMatch", testMatchTrivialNoMatch),
+        ("testMatchBindAttr", testMatchBindAttr),
+
     ]
 
 
