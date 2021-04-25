@@ -23,7 +23,7 @@ public enum Diff {
                     .map { NodeDelta.attributeMissing($0) }
                 let added = Array(rNames.subtracting(lNames))
                     .map { NodeDelta.attributeAdded($0) }
-                let children = Array(lNames.union(rNames)).flatMap { name -> [NodeDelta] in
+                let children = Array(lNames.intersection(rNames)).flatMap { name -> [NodeDelta] in
                     switch (lAttrs[name]!, rAttrs[name]!) {
                     case (.Prim(let lPrim), .Prim(let rPrim)):
                         if lPrim == rPrim {
