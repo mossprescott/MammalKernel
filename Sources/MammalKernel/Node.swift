@@ -25,10 +25,10 @@ public struct NodeId: Hashable {
 /// separated by a slash.
 /// For example, an integer literal in the kernel language has the type `"kernel/int"`.
 public struct NodeType: Hashable {
-    var type: String
+    public var fullName: String
 
     public init(_ language: String, _ name: String) {
-        self.type = language + "/" + name
+        self.fullName = language + "/" + name
     }
 }
 
@@ -43,7 +43,7 @@ public struct AttrName: Hashable {
 
     /// Compose an attribute name from a node type plus a unique short name
     public init(_ parent: NodeType, _ shortName: String) {
-        self.name = parent.type + "/" + shortName
+        self.name = parent.fullName + "/" + shortName
     }
 
     /// For attributes that are used with more than one type of node.
@@ -59,7 +59,7 @@ public struct AttrName: Hashable {
 
 /// Every node has an `id`,  `type`, and some kind of content, which may be a collection of attributes,
 /// a sequence of nodes, a reference to another node, or nothing at all.
-public struct Node {
+public struct Node: CustomDebugStringConvertible {
     public var id: NodeId
     public var type: NodeType
     public var content: Content
@@ -91,6 +91,56 @@ public struct Node {
         self.id = id
         self.type = type
         self.content = content
+    }
+
+    /// A reasonably human-readable, fairly compressed, nicely indented, mostly unambiguous, string representation.
+    public var debugDescription: String {
+        func writeNode(_ node: Node) -> [String] {
+            func writeContent(_ content: Node.Content) -> [String] {
+                switch content {
+                case .Attrs(let attrs):
+                    return attrs.map { attr, v -> [String] in
+                        let name = attr.name.remove(prefix: node.type.fullName + "/")
+                        switch v {
+                        case .Prim(.Nil):
+                            return ["- \(name): nil"]
+                        case .Prim(.Bool(let x)):
+                            return ["- \(name): \(x)"]
+                        case .Prim(.Int(let x)):
+                            return ["- \(name): \(x)"]
+                        case .Prim(.String(let x)):
+                            return ["- \(name): \(x.debugDescription)"]
+                        case .Node(let child):
+                            return ["- \(name):"]
+                                + writeNode(child).map { "    " + $0 }
+                        }
+                    }.flatMap { $0 }
+
+                case .Elems(let elems):
+                    return elems.flatMap(writeNode)
+
+                case .Ref(let target):
+                    return ["ref: \(target.id)"]
+
+                case .Empty:
+                    return []
+                }
+            }
+            return ["\(node.type.fullName) [\(node.id.id)]"] +
+                writeContent(node.content).map { "  " + $0 }
+        }
+        return writeNode(self).joined(separator: "\n")
+    }
+}
+
+extension String {
+    func remove(prefix: String) -> Substring {
+        if self.starts(with: prefix) {
+            return self.dropFirst(prefix.count)
+        }
+        else {
+            return Substring(self)
+        }
     }
 }
 
