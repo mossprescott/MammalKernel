@@ -502,8 +502,10 @@ public enum Kernel {
     /// Or, can be Attrs containing other information not used during evaluation.
     public enum Bind {
         public static let type = NodeType("kernel", "bind")
-        // TODO: use an optional parameter as a hint for the name during evaluation,
-        // for debugging?
+
+        /// Note: this name is optional and not used during evaluation, but should probably be provided whenever code
+        /// could possible be displayed to a human.
+        public static let name = AttrName(type, "name")
     }
 
     public enum Lambda {

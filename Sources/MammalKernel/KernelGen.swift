@@ -42,10 +42,10 @@ public class KernelGen {
 
     /// Make a Bind node and a generator for Vars that refer to it. Note: `Let` and `Lambda` take care of this for you, but the
     /// individual parts might be needed for constructing patterns.
-    public func bindGen() -> (Node, VarGen) {
+    public func bindGen(name: String? = nil) -> (Node, VarGen) {
         let bind = Node(idGen.generateId(),
                         Kernel.Bind.type,
-                        .Empty)
+                        name.map { .Attrs([Kernel.Bind.name: .Prim(.String($0))]) } ?? .Empty)
         return (bind,
                 {
                     Node(self.idGen.generateId(),
@@ -54,8 +54,8 @@ public class KernelGen {
                 })
     }
 
-    public func Let(expr: Node, body: (VarGen) -> Node) -> Node {
-        let (bind, ref) = bindGen()
+    public func Let(expr: Node, name: String? = nil, body: (VarGen) -> Node) -> Node {
+        let (bind, ref) = bindGen(name: name)
         return Node(idGen.generateId(),
                     Kernel.Let.type,
                     .Attrs([
@@ -66,8 +66,12 @@ public class KernelGen {
     }
 
     public func Lambda(arity: Int, body: (VarGen, [VarGen]) -> Node) -> Node {
+        return Lambda(paramNames: Array(repeating: nil, count: arity), body: body)
+    }
+
+    public func Lambda(paramNames: [String?], body: (VarGen, [VarGen]) -> Node) -> Node {
         let lambdaId = idGen.generateId()
-        let params = Array(repeating: (), count: arity).map(bindGen)
+        let params = paramNames.map(bindGen)
 
         return Node(lambdaId,
                     Kernel.Lambda.type,
