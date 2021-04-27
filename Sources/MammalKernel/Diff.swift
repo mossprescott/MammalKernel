@@ -8,7 +8,7 @@
 /// changes embedded within the common structure.
 public enum Diff {
     /// Compare two trees, ignoring ids but reporting all other differences.
-    /// The value on the right is considered the "new" value: if it contains somethng thats not
+    /// The value on the right is considered the "new" value: if it contains something that's not
     /// in the left value, the new thing is "added"; if the reverse, the thing is "missing"
     public static func changes(from old: Node, to new: Node) -> [NodeDelta] {
         if old.type != new.type {
@@ -45,9 +45,9 @@ public enum Diff {
             case (.Elems(let lElems), .Elems(let rElems)):
                 // TODO: detect insertions and deletions, when some matching elements are present
                 let missing = Array(repeating: NodeDelta.elementMissing,
-                                    count: lElems.count - rElems.count)
+                                    count: max(0, lElems.count - rElems.count))
                 let added = Array(repeating: NodeDelta.elementAdded,
-                                  count: rElems.count - lElems.count)
+                                  count: max(0, rElems.count - lElems.count))
                 let children = zip(lElems, rElems).flatMap { (l, r) in
                     changes(from: l, to: r)
                 }
