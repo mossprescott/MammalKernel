@@ -420,9 +420,12 @@ public enum Kernel {
 
         if let bound = loop(patternNode: pattern, valueNode: rtNode),
            bindings.allSatisfy({ id in bound.keys.contains(id) }) {
+//            print("matched: \(rtNode)")
+//            print("bound: \(bound)")
             return .Matched(bindings.map { id in .Val(bound[id]!) })
         }
         else {
+//            print("no match: \(rtNode)")
             return .NoMatch
         }
 
