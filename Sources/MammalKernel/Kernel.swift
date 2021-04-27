@@ -235,6 +235,9 @@ public enum Kernel {
                 translate(expr, constants: constants)
             })
         }
+        else if node.type == UnquoteSplice.type {
+            return .Error(.TypeError(expected: "something other than UnquoteSplice", found: .Val(.Node(node))))
+        }
         else {
             func expandChildNode(_ child: Node) throws -> Node.Value {
                 let expandedVal = try expandQuotedNode(child, constants: constants, eval: eval)
@@ -249,6 +252,31 @@ public enum Kernel {
                 }
             }
 
+            func expandChildNodeOrSplice(_ child: Node) throws -> [Node.Value] {
+                if child.type == Kernel.UnquoteSplice.type {
+                    let expanded = try eval(requiredExpr(child, UnquoteSplice.expr) { expr in
+                        translate(expr, constants: constants)
+                    })
+                    switch expanded {
+                    case .Val(.Node(let node)):
+                        switch node.content {
+                        case .Elems(let elems):
+                            return elems.map { .Node($0) }
+                        default:
+                            throw Eval.RuntimeError.TypeError(expected: "sequence node",
+                                                              found: .Val(expanded))
+                        }
+                    default:
+                        throw Eval.RuntimeError.TypeError(expected: "sequence node",
+                                                          found: .Val(expanded))
+                    }
+                }
+                else {
+                    let expanded = try expandChildNode(child)
+                    return [expanded]
+                }
+            }
+
             switch node.content {
             case .Attrs(let attrs):
                 let expandedAttrs = try attrs.mapValues { val throws -> Node.Value in
@@ -260,19 +288,19 @@ public enum Kernel {
                 return .Val(.Node(Node(node.id, node.type, .Attrs(expandedAttrs))))
 
             case .Elems(let elems):
-                // TODO: handle UnquoteSplice. Need some kind of list type in Kernel?
-
-                let expandedElems = try elems.map { child throws -> Node in
-                    switch try expandChildNode(child) {
-                    case .Prim(let expandedVal):
-                        throw Eval.RuntimeError<Node.Value>.TypeError(
-                            expected: "node for Elems during quote expansion",
-                            found: .Val(.Prim(expandedVal)))
-                    case .Node(let expandedChild):
-                        return expandedChild
+                let expandedElems = try elems.flatMap { child throws -> [Node] in
+                    let expanded = try expandChildNodeOrSplice(child)
+                    return try expanded.map { val -> Node in
+                        switch val {
+                        case .Prim(let expandedVal):
+                            throw Eval.RuntimeError<Node.Value>.TypeError(
+                                expected: "node for Elems during quote expansion",
+                                found: .Val(.Prim(expandedVal)))
+                        case .Node(let expandedChild):
+                            return expandedChild
+                        }
                     }
                 }
-
                 return .Val(.Node(Node(node.id, node.type, .Elems(expandedElems))))
 
             case .Ref(_):

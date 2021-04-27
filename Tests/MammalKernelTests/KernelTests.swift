@@ -195,6 +195,55 @@ final class KernelTests: XCTestCase {
         XCTAssertEqual(Diff.changes(from: expected, to: result), [])
     }
 
+    func testUnquoteSplice() throws {
+        func intNode(_ x: Int) -> Node {
+            return Node(IdGen.Shared.generateId(),
+                        NodeType("test", "intValue"),
+                        .Attrs([
+                            AttrName("test", "value"):
+                                .Prim(.Int(x))
+                        ]))
+        }
+
+        let intsConstantType = NodeType("test-builtin", "ints")
+        let intsConstantValue: Eval.Value<Node.Value> =
+            .Val(.Node(
+                    Node(NodeId(1),
+                         NodeType("test", "ints"),
+                         .Elems([
+                            intNode(1),
+                            intNode(2),
+                            intNode(3),
+                         ]))))
+        let builtin = [
+            intsConstantType: intsConstantValue,
+        ]
+
+        let pgm = gen.Quote(body: Node(NodeId(1000),
+                                       NodeType("test", "values"),
+                                       .Elems([
+                                        intNode(0),
+                                        gen.UnquoteSplice(expr: gen.Constant(intsConstantType)),
+                                        intNode(4)
+                                       ])))
+
+        let expected = Node(NodeId(2000),
+                            NodeType("test", "values"),
+                            .Elems([
+                                intNode(0),
+                                intNode(1),
+                                intNode(2),
+                                intNode(3),
+                                intNode(4),
+                            ]) as Node.Content)
+
+        let result = try Kernel.eval(pgm, constants: builtin)
+
+        print(result.debugDescription)
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
+    }
+
     func testMatchTrivial() throws {
         let pgm = gen.Match(expr: gen.Int(42),
                             pattern: gen.Int(42),
