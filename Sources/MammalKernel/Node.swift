@@ -93,6 +93,50 @@ public struct Node: CustomDebugStringConvertible {
         self.content = content
     }
 
+    /// Namespace hiding away some handy functions that shouldn't be used lightly.
+    public enum Util {
+        /// Construct a dictionary of every node in the tree (including the root), keyed by id.
+        /// *WARNING*: this isn't cheap and should be avoided when possible. 
+        public static func descendants(of root: Node) -> [NodeId: Node] {
+            var nodesById: [NodeId: Node] = [:]
+            func loop(_ node: Node) {
+                nodesById[node.id] = node
+                switch node.content {
+                case .Attrs(let attrs):
+                    for val in attrs.values {
+                        switch val {
+                        case .Node(let child): loop(child)
+                        default: break
+                        }
+                    }
+                case .Elems(let elems):
+                    for child in elems { loop(child) }
+                case .Ref(_), .Empty:
+                    break
+                }
+            }
+            loop(root)
+            return nodesById
+        }
+
+        // List of direct child nodes, if any, in no particular order.
+        public static func children(of node: Node) -> [Node] {
+            switch node.content {
+            case .Attrs(let attrs):
+                return attrs.values.compactMap { val in
+                    switch val {
+                    case .Prim(_): return nil
+                    case .Node(let node): return node
+                    }
+                }
+            case .Elems(let elems):
+                return elems
+            case .Ref(_), .Empty:
+                return []
+            }
+        }
+    }
+
     /// A reasonably human-readable, fairly compressed, nicely indented, mostly unambiguous, string representation.
     public var debugDescription: String {
         func writeNode(_ node: Node) -> [String] {
