@@ -226,92 +226,136 @@ public enum Kernel {
     ///
     /// Note: this function gets called during evaluation, and in turn calls back into the evaluator,
     /// so it can throw RuntimeError, in keeping with the way those errors are currently handled.
-    static func expandQuotedNode(_ node: Node,
+    static func expandQuotedNode(_ root: Node,
                                  constants: [NodeType: Eval.Value<Node.Value>],
                                  eval: Eval.EvalInContext<Node.Value>)
                                         throws -> Eval.Value<Node.Value> {
-        if node.type == Unquote.type {
-            return try eval(requiredExpr(node, Unquote.expr) { expr in
-                translate(expr, constants: constants)
-            })
-        }
-        else if node.type == UnquoteSplice.type {
-            return .Error(.TypeError(expected: "something other than UnquoteSplice", found: .Val(.Node(node))))
-        }
-        else {
-            func expandChildNode(_ child: Node) throws -> Node.Value {
-                let expandedVal = try expandQuotedNode(child, constants: constants, eval: eval)
-                switch expandedVal {
-                case .Val(let expandedChild):
-                    return expandedChild
-                case .Fn(_, _):
-                    throw Eval.RuntimeError.TypeError(expected: "normal value during quote expansion",
-                                                      found: expandedVal)
-                case .Error(let err):
-                    throw err
+
+        func expandNode(_ node: Node, level: Int) throws -> Eval.Value<Node.Value> {
+            if node.type == Unquote.type, let expr = try unrollUnquoteExpr(node, levels: level) {
+                return try eval(translate(expr, constants: constants))
+            }
+            else if level == 1 && node.type == UnquoteSplice.type {
+                return .Error(.TypeError(expected: "something other than UnquoteSplice", found: .Val(.Node(node))))
+            }
+            else {
+                let innerLevel: Int = {
+                    switch node.type {
+                    case Kernel.Quote.type:
+                        return level + 1
+                    case Kernel.Unquote.type, Kernel.UnquoteSplice.type:
+                        return level - 1
+                    default:
+                        return level
+                    }
+                }()
+
+                switch node.content {
+                case .Attrs(let attrs):
+                    let expandedAttrs = try attrs.mapValues { val throws -> Node.Value in
+                        switch val {
+                        case .Prim(_): return val
+                        case .Node(let child): return try expandChild(child, level: innerLevel)
+                        }
+                    }
+                    return .Val(.Node(Node(node.id, node.type, .Attrs(expandedAttrs))))
+
+                case .Elems(let elems):
+                    let expandedElems = try elems.flatMap { child throws -> [Node] in
+                        let expanded = try expandChildOrSplice(child, level: innerLevel)
+                        return try expanded.map { val -> Node in
+                            switch val {
+                            case .Prim(let expandedVal):
+                                throw Eval.RuntimeError<Node.Value>.TypeError(
+                                    expected: "node for Elems during quote expansion",
+                                    found: .Val(.Prim(expandedVal)))
+                            case .Node(let expandedChild):
+                                return expandedChild
+                            }
+                        }
+                    }
+                    return .Val(.Node(Node(node.id, node.type, .Elems(expandedElems))))
+
+                case .Ref(_):
+                    // TODO: verify that the ref points to a node within the quotation?
+                    // TODO: re-label nodes to avoid collisions
+                    return .Val(.Node(node))
+
+                case .Empty:
+                    return .Val(.Node(node))
                 }
             }
+        }
 
-            func expandChildNodeOrSplice(_ child: Node) throws -> [Node.Value] {
-                if child.type == Kernel.UnquoteSplice.type {
-                    let expanded = try eval(requiredExpr(child, UnquoteSplice.expr) { expr in
-                        translate(expr, constants: constants)
-                    })
-                    switch expanded {
-                    case .Val(.Node(let node)):
-                        switch node.content {
-                        case .Elems(let elems):
-                            return elems.map { .Node($0) }
-                        default:
-                            throw Eval.RuntimeError.TypeError(expected: "sequence node",
-                                                              found: .Val(expanded))
-                        }
+        func expandChild(_ child: Node, level: Int) throws -> Node.Value {
+            let expandedVal = try expandNode(child, level: level)
+            switch expandedVal {
+            case .Val(let expandedChild):
+                return expandedChild
+            case .Fn(_, _):
+                throw Eval.RuntimeError.TypeError(expected: "normal value during quote expansion",
+                                                  found: expandedVal)
+            case .Error(let err):
+                throw err
+            }
+        }
+
+        func expandChildOrSplice(_ child: Node, level: Int) throws -> [Node.Value] {
+            if level == 1 && child.type == Kernel.UnquoteSplice.type {
+                let expanded = try eval(requiredExpr(child, UnquoteSplice.expr) { expr in
+                    translate(expr, constants: constants)
+                })
+                switch expanded {
+                case .Val(.Node(let node)):
+                    switch node.content {
+                    case .Elems(let elems):
+                        return elems.map { .Node($0) }
                     default:
                         throw Eval.RuntimeError.TypeError(expected: "sequence node",
                                                           found: .Val(expanded))
                     }
-                }
-                else {
-                    let expanded = try expandChildNode(child)
-                    return [expanded]
+                default:
+                    throw Eval.RuntimeError.TypeError(expected: "sequence node",
+                                                      found: .Val(expanded))
                 }
             }
-
-            switch node.content {
-            case .Attrs(let attrs):
-                let expandedAttrs = try attrs.mapValues { val throws -> Node.Value in
-                    switch val {
-                    case .Prim(_): return val
-                    case .Node(let child): return try expandChildNode(child)
-                    }
-                }
-                return .Val(.Node(Node(node.id, node.type, .Attrs(expandedAttrs))))
-
-            case .Elems(let elems):
-                let expandedElems = try elems.flatMap { child throws -> [Node] in
-                    let expanded = try expandChildNodeOrSplice(child)
-                    return try expanded.map { val -> Node in
-                        switch val {
-                        case .Prim(let expandedVal):
-                            throw Eval.RuntimeError<Node.Value>.TypeError(
-                                expected: "node for Elems during quote expansion",
-                                found: .Val(.Prim(expandedVal)))
-                        case .Node(let expandedChild):
-                            return expandedChild
-                        }
-                    }
-                }
-                return .Val(.Node(Node(node.id, node.type, .Elems(expandedElems))))
-
-            case .Ref(_):
-                // TODO: verify that the ref points to a node within the quotation?
-                // TODO: re-label nodes to avoid collisions
-                return .Val(.Node(node))
-
-            case .Empty:
-                return .Val(.Node(node))
+            else {
+                let expanded = try expandChild(child, level: level)
+                return [expanded]
             }
         }
+
+        // Dig into `unquote` nodes to find the `expr` node embedded exactly the given number of
+        // levels, if any. If any other node is encountered first, then nil. If an unquote is found
+        // first, but it doesn't have a node for `expr`, then throw.
+        func unrollUnquoteExpr(_ node: Node, levels: Int) throws -> Node? {
+            let result: Either<Eval.Expr<Node.Value>, Node> = required(node, Unquote.expr, expected: "<node>") { expr in
+                switch expr {
+                case .Prim(_):
+                    return nil
+                case .Node(let exprNode):
+                    return exprNode
+                }
+            }
+            switch result {
+            case .left(let err):
+                let _ = try eval(err)
+                fatalError("can't get here")
+
+            case .right(let exprNode):
+                if levels == 1 {
+                    return exprNode
+                }
+                else if exprNode.type == Kernel.Unquote.type {
+                    return try unrollUnquoteExpr(exprNode, levels: levels-1)
+                }
+                else {
+                    return nil
+                }
+            }
+        }
+
+        return try expandNode(root, level: 1)
     }
 
 // MARK: - Pattern matching

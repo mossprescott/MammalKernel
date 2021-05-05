@@ -244,6 +244,127 @@ final class KernelTests: XCTestCase {
         XCTAssertEqual(Diff.changes(from: expected, to: result), [])
     }
 
+//    /// Quoted lambda with interpolation happening within the body. This is the typical case for
+//    /// macro expansion. For simplicity, the captured value is just a constant.
+//    func testQuoteLambda() throws {
+//        let capturedType = NodeType("test-builtin", "x")
+//        let capturedValue: Eval.Value<Node.Value> = .Val(.Prim(.Int(42)))
+//        let builtin = [
+//            capturedType: capturedValue,
+//        ]
+//
+//        let pgm = gen.Quote(body: gen.Lambda(paramNames: ["_"]) { _, _ in
+//            gen.Unquote(expr: gen.Constant(capturedType))
+//        })
+//
+//        let result = try Kernel.eval(pgm, constants: builtin)
+//
+//        print(result)
+//
+//        XCTFail("\(result)")
+//    }
+
+    func testQuotedQuote() throws {
+        let fType = NodeType("test-builtin", "f")  // Note: never actually evaluated.
+        let builtin: [NodeType: Eval.Value<Node.Value>] = [:]
+
+        // kernel/int, but accepting an arbitrary node (i.e. an unquote)
+        func genInt(_ val: Node) -> Node {
+            Node(IdGen.Shared.generateId(),
+                 Kernel.Int_.type,
+                 .Attrs([
+                    Kernel.Int_.value: .Node(val),
+                 ]))
+        }
+
+        let pgm = gen.Quote(
+            body: gen.Quote(
+                body: gen.App(fn: gen.Constant(fType),
+                              args: [
+                                gen.Int(2),
+
+                                // Still quoted:
+                                genInt(gen.Unquote(expr: gen.Int(1))),
+                              ])))
+
+        let expected1 = gen.Quote(
+            body: gen.App(fn: gen.Constant(fType),
+                          args: [
+                            gen.Int(2),
+                            genInt(gen.Unquote(expr: gen.Int(1))),
+                          ]))
+
+        let result1 = try Kernel.eval(pgm, constants: builtin)
+
+        XCTAssertEqual(Diff.changes(from: expected1, to: result1), [])
+
+
+        // Now evaluate a second time to eliminate the second-level of quotation:
+
+        let expected2 = gen.App(fn: gen.Constant(fType),
+                               args: [
+                                   gen.Int(2),
+                                   gen.Int(1),
+                               ])
+
+        let result2 = try Kernel.eval(result1, constants: builtin)
+
+        XCTAssertEqual(Diff.changes(from: expected2, to: result2), [])
+    }
+
+    func testQuotedQuoteWithUnquotedUnquote() throws {
+        let fType = NodeType("test-builtin", "f")  // Note: never actually evaluated.
+        let builtin: [NodeType: Eval.Value<Node.Value>] = [:]
+
+        // kernel/int, but accepting an arbitrary node (i.e. an unquote)
+        func genInt(_ val: Node) -> Node {
+            Node(IdGen.Shared.generateId(),
+                 Kernel.Int_.type,
+                 .Attrs([
+                    Kernel.Int_.value: .Node(val),
+                 ]))
+        }
+
+        let pgm = gen.Quote(
+            body: gen.Quote(
+                body: gen.App(fn: gen.Constant(fType),
+                              args: [
+                                gen.Int(2),
+
+                                // Still quoted:
+                                genInt(gen.Unquote(expr: gen.Int(1))),
+
+                                // Unquoted twice to get back to the outer context:
+                                genInt(gen.Unquote(expr: gen.Unquote(expr: gen.Int(0)))),
+                              ])))
+
+        let expected1 = gen.Quote(body:
+                                    gen.App(fn: gen.Constant(fType),
+                                            args: [
+                                                gen.Int(2),
+                                                genInt(gen.Unquote(expr: gen.Int(1))),
+                                                gen.Int(0),
+                                            ]))
+
+        let result1 = try Kernel.eval(pgm, constants: builtin)
+
+        XCTAssertEqual(Diff.changes(from: expected1, to: result1), [])
+
+
+        // Now evaluate a second time to eliminate the second-level of quotation:
+
+        let expected2 = gen.App(fn: gen.Constant(fType),
+                                args: [
+                                    gen.Int(2),
+                                    gen.Int(1),
+                                    gen.Int(0),
+                                ])
+
+        let result2 = try Kernel.eval(result1, constants: builtin)
+
+        XCTAssertEqual(Diff.changes(from: expected2, to: result2), [])
+    }
+
     func testMatchTrivial() throws {
         let pgm = gen.Match(expr: gen.Int(42),
                             pattern: gen.Int(42),
