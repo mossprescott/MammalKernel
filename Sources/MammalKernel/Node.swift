@@ -97,7 +97,7 @@ public struct Node: CustomDebugStringConvertible {
     public enum Util {
         /// Construct a dictionary of every node in the tree (including the root), keyed by id.
         /// *WARNING*: this isn't cheap and should be avoided when possible. 
-        public static func descendants(of root: Node) -> [NodeId: Node] {
+        public static func descendantsById(of root: Node) -> [NodeId: Node] {
             var nodesById: [NodeId: Node] = [:]
             func loop(_ node: Node) {
                 nodesById[node.id] = node
@@ -134,6 +134,26 @@ public struct Node: CustomDebugStringConvertible {
             case .Ref(_), .Empty:
                 return []
             }
+        }
+
+        /// List of ancestors forming a path to the root of the tree, if it is present. The first element of the result is the target node, and
+        /// the last is the given root. If the target appears more than once, a single path is chosen at random.
+        /// *WARNING*: this isn't cheap and should be avoided when possible.
+        public static func ancestors(of targetId: NodeId, within root: Node) -> [Node]? {
+            func loop(_ node: Node) -> [Node]? {
+                if node.id == targetId {
+                    return [node]
+                }
+                else {
+                    for child in children(of: node) {
+                        if let partialResult = loop(child) {
+                            return partialResult + [node]
+                        }
+                    }
+                    return nil
+                }
+            }
+            return loop(root)
         }
     }
 

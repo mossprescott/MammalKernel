@@ -102,7 +102,7 @@ public enum Reduce {
         public func reduce(_ root: Node) -> (Node, SourceMap) {
             let lib = library.buildValues(root)
 
-            let allSourceIds = Set(Node.Util.descendants(of: root).keys)
+            let allSourceIds = Set(Node.Util.descendantsById(of: root).keys)
             var reducedRootToSourceId: [NodeId: NodeId] = [:]
             func record(_ from: Node, reducedTo to: Node) {
                 if let previousResult = reducedRootToSourceId[from.id] {
@@ -201,7 +201,7 @@ public enum Reduce {
 // MARK: -Internals
 
     private static func makeResolver(within root: Node) -> Eval.Value<Node.Value> {
-        let nodesById = Node.Util.descendants(of: root)
+        let nodesById = Node.Util.descendantsById(of: root)
 
         return Eval.Value.Fn(arity: 1) { args in
             switch args[0] {
