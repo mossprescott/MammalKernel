@@ -129,7 +129,7 @@ public enum Reduce {
                             print("Reduction returned nil: \(node)")
                             return nil
                         } else if result.type == Kernel.Fail.type {
-                            print("Reduction returned an error: \(result)")
+                            print("Reduction returned an error: \(result); \(node)")
                             return nil
                         } else {
                             record(node, reducedTo: result)
@@ -137,7 +137,7 @@ public enum Reduce {
                         }
                     }
                     catch {
-                        print("Reduction threw an exception: \(error)")
+                        print("Reduction threw an exception: \(error); \(node)")
                         return nil
                     }
                 }
