@@ -78,6 +78,9 @@ public enum Reduce {
         /// A library of values which are available when each reduction is evaluated.
         public var library: Library
 
+        /// A hook to avoid hard-coding the NodeId generator.
+        var generateId = IdGen.Shared.generateId
+
         // TODO: some kind of overridable handler for each error case that can be trapped
 
         public init(_ reducers: [NodeType: Node], library: Library = Library.resolver) {
@@ -159,13 +162,13 @@ public enum Reduce {
                                 return .Node(loop(child))
                             }
                         })
-                    let rebuilt = Node(IdGen.Shared.generateId(), node.type, reducedAttrs)
+                    let rebuilt = Node(generateId(), node.type, reducedAttrs)
                     record(node, reducedTo: rebuilt)
                     return rebuilt
 
                 case .Elems(let elems):
                     let reducedElems: Node.Content = .Elems(elems.map(loop))
-                    let rebuilt = Node(IdGen.Shared.generateId(),
+                    let rebuilt = Node(generateId(),
                                        node.type,
                                        reducedElems)
                     record(node, reducedTo: rebuilt)
