@@ -46,7 +46,8 @@ final class ReduceTests: XCTestCase {
     }
 
     /// No new nodes, even when there is a child present.
-    func testNoOpWithChild() throws {
+    #warning("Pending test skipped in Xcode")
+    func _pending_testNoOpWithChild() throws {
         let foo = Node(IdGen.Shared.generateId(),
                        fooType,
                        .Empty)
@@ -115,8 +116,67 @@ final class ReduceTests: XCTestCase {
         try checkInvariants(pgm: pgm, result: result, sourceMap)
     }
 
-    /// Two children going from foo -> bar side-by-side.
-    func testParallelReplace() throws {
+    /// foo -> bar [baz]
+    func testSimpleExpand() throws {
+        let pgm = Node(IdGen.Shared.generateId(),
+                       fooType,
+                       .Empty)
+
+        let reduction = Reduce.TopDown(
+            [
+                fooType: kernel.Lambda(arity: 1) { _, _ in
+                    kernel.Quote(body:
+                                    Node(IdGen.Shared.generateId(),
+                                         barType,
+                                         .Elems([
+                                                    Node(IdGen.Shared.generateId(),
+                                                         bazType,
+                                                         .Empty)
+                                         ])))
+                },
+            ])
+
+        let (result, sourceMap) = reduction.reduce(pgm)
+
+        XCTAssertNotEqual(result.id, pgm.id)
+        XCTAssertEqual(result.type, barType)
+
+        try checkInvariants(pgm: pgm, result: result, sourceMap)
+    }
+
+    /// `foo -> bar { baz [] }]`.  The extra level of nodes means additional traversal and another opportunity to include
+    /// something extra in the SourceMap.
+    func testExpandDeep() throws {
+        let pgm = Node(IdGen.Shared.generateId(),
+                       fooType,
+                       .Empty)
+
+        let reduction = Reduce.TopDown(
+            [
+                fooType: kernel.Lambda(arity: 1) { _, _ in
+                    kernel.Quote(body:
+                                    Node(IdGen.Shared.generateId(),
+                                         barType,
+                                         .Attrs([
+                                            AttrName(barType, "baz"):
+                                                .Node(Node(IdGen.Shared.generateId(),
+                                                           bazType,
+                                                           .Elems([]))),
+                                         ])))
+                },
+            ])
+
+        let (result, sourceMap) = reduction.reduce(pgm)
+
+        XCTAssertNotEqual(result.id, pgm.id)
+        XCTAssertEqual(result.type, barType)
+
+        try checkInvariants(pgm: pgm, result: result, sourceMap)
+    }
+
+    /// Two children going from `foo` to `bar` side-by-side; requires relabeling during quote expansion.
+    #warning("Pending test skipped in Xcode")
+    func _pending_testParallelReplace() throws {
         let foo1 = Node(IdGen.Shared.generateId(),
                        fooType,
                        .Empty)
@@ -181,8 +241,6 @@ final class ReduceTests: XCTestCase {
         try checkInvariants(pgm: pgm, result: result, sourceMap)
     }
 
-
-
     // TODO: some source node gets duplicated via unquote
 
     // TODO: reduction loops infinitely (and gets interrupted)
@@ -195,17 +253,18 @@ final class ReduceTests: XCTestCase {
                          line: UInt = #line) throws {
 
 
-        print("pgm:\n\(pgm.debugDescription)")
-        print("result:\n\(result.debugDescription)")
-        print("sourceMap:")
-        sourceMap.sourceIds.forEach { out, src in
-            print("  \(out) -> \(src)")
-        }
+//        print("pgm:\n\(pgm.debugDescription)")
+//        print("result:\n\(result.debugDescription)")
+//        print("sourceMap:")
+//        sourceMap.sourceIds.forEach { out, src in
+//            print("  \(out) -> \(src)")
+//        }
 
-//        XCTAssertTrue(Set(sourceMap.sourceIds.values),
-//                       Set(Node.Util.descendants(of: pgm).keys),
-//                       "every source node must appear in sourceMap (as a value)",
-//                       file: file, line: line)
+        if result.id != pgm.id {
+            XCTAssertEqual(sourceMap.sourceIds[result.id], pgm.id,
+                           "result root is mapped to the source root",
+                           file: file, line: line)
+        }
 
         let sourceIds = Set(sourceMap.sourceIds.values)
         let pgmNodeIds = Set(Node.Util.descendants(of: pgm).keys)
@@ -239,7 +298,11 @@ final class ReduceTests: XCTestCase {
     static var allTests = [
         ("testNoOp", testNoOp),
         ("testSimpleReplace", testSimpleReplace),
-        ("testParallelReplace", testParallelReplace),
+        ("testNoOpWithChild", _pending_testNoOpWithChild),
+        ("testReplaceChild", testReplaceChild),
+        ("testSimpleExpand", testSimpleExpand),
+        ("testExpandDeep", testExpandDeep),
+        ("testParallelReplace", _pending_testParallelReplace),
         ("testChain", testChain),
     ]
 }
