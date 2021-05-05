@@ -7,6 +7,7 @@ final class ReduceTests: XCTestCase {
     let fooType = NodeType("test", "foo")
     let barType = NodeType("test", "bar")
     let bazType = NodeType("test", "baz")
+    let fooParentType = NodeType("test", "fooParent")
     let childAttr = AttrName(fullName: "test/child")
 
     func testNoOp() throws {
@@ -44,13 +45,39 @@ final class ReduceTests: XCTestCase {
         try checkInvariants(pgm: pgm, result: result, sourceMap)
     }
 
+    /// No new nodes, even when there is a child present.
+    func testNoOpWithChild() throws {
+        let foo = Node(IdGen.Shared.generateId(),
+                       fooType,
+                       .Empty)
+        let pgm = Node(IdGen.Shared.generateId(),
+                       fooParentType,
+                       .Attrs([
+                        childAttr: .Node(foo)
+                       ]))
+
+        let reduction = Reduce.TopDown([:])
+
+        let (result, sourceMap) = reduction.reduce(pgm)
+
+        XCTAssertEqual(result.id, pgm.id)
+        XCTAssertEqual(result.type, fooParentType)
+
+        XCTAssertEqual(Node.Util.children(of: result).map(\.id), [foo.id])
+        XCTAssertEqual(Node.Util.children(of: result).map(\.type), [fooType])
+
+        XCTAssertTrue(sourceMap.sourceIds.isEmpty)
+
+        try checkInvariants(pgm: pgm, result: result, sourceMap)
+    }
+
     /// A single child goes from foo -> bar.
     func testReplaceChild() throws {
         let foo = Node(IdGen.Shared.generateId(),
                        fooType,
                        .Empty)
         let pgm = Node(IdGen.Shared.generateId(),
-                       NodeType("test", "fooParent"),
+                       fooParentType,
                        .Attrs([
                         childAttr: .Node(foo)
                        ]))
@@ -61,7 +88,7 @@ final class ReduceTests: XCTestCase {
             ])
 
         let expected = Node(IdGen.Shared.generateId(),
-                            NodeType("test", "fooParent"),
+                            fooParentType,
                             .Attrs([
                                 childAttr: .Node(
                                     Node(IdGen.Shared.generateId(),
@@ -70,13 +97,6 @@ final class ReduceTests: XCTestCase {
                             ]))
 
         let (result, sourceMap) = reduction.reduce(pgm)
-
-        print("pgm:\n\(pgm.debugDescription)")
-        print("expected:\n\(expected.debugDescription)")
-        print("result:\n\(result.debugDescription)")
-        sourceMap.sourceIds.forEach { out, src in
-            print("\(out) -> \(src)")
-        }
 
         XCTAssertEqual(Diff.changes(from: expected, to: result), [])
 
@@ -104,7 +124,7 @@ final class ReduceTests: XCTestCase {
                        fooType,
                        .Empty)
         let pgm = Node(IdGen.Shared.generateId(),
-                       NodeType("test", "fooParent"),
+                       fooParentType,
                        .Elems([foo1, foo2]))
 
         let reduction = Reduce.TopDown(
@@ -113,7 +133,7 @@ final class ReduceTests: XCTestCase {
             ])
 
         let expected = Node(IdGen.Shared.generateId(),
-                            NodeType("test", "fooParent"),
+                            fooParentType,
                             .Elems([
                                 Node(IdGen.Shared.generateId(),
                                      barType,
@@ -124,13 +144,6 @@ final class ReduceTests: XCTestCase {
                             ]))
 
         let (result, sourceMap) = reduction.reduce(pgm)
-
-        print("pgm:\n\(pgm.debugDescription)")
-        print("expected:\n\(expected.debugDescription)")
-        print("result:\n\(result.debugDescription)")
-        sourceMap.sourceIds.forEach { out, src in
-            print("\(out) -> \(src)")
-        }
 
         XCTAssertEqual(Diff.changes(from: expected, to: result), [])
 
@@ -167,6 +180,8 @@ final class ReduceTests: XCTestCase {
 
         try checkInvariants(pgm: pgm, result: result, sourceMap)
     }
+
+
 
     // TODO: some source node gets duplicated via unquote
 
