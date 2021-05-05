@@ -267,13 +267,13 @@ final class ReduceTests: XCTestCase {
         }
 
         let sourceIds = Set(sourceMap.sourceIds.values)
-        let pgmNodeIds = Set(Node.Util.descendants(of: pgm).keys)
+        let pgmNodeIds = Set(Node.Util.descendantsById(of: pgm).keys)
         XCTAssertTrue(sourceIds.isSubset(of: pgmNodeIds),
                        "every value of sourceMap is a node in the source tree",
                        file: file, line: line)
 
         let reducedRootIds = Set(sourceMap.sourceIds.keys)
-        let outputNodeIds = Set(Node.Util.descendants(of: result).keys)
+        let outputNodeIds = Set(Node.Util.descendantsById(of: result).keys)
         XCTAssertTrue(reducedRootIds.isSubset(of: outputNodeIds),
                        "every key of sourceMap is a node in the output tree",
                        file: file, line: line)
