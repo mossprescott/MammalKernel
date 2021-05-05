@@ -152,6 +152,8 @@ public class KernelGen {
     }
 
     /// An empty node with the given type, which will usually refer to a "constant" (i.e. a builtin).
+    /// Note: there is no actual `kernel` constructor for this; the node just appears in the tree and the evaluator will trap it if it
+    /// has been provided with a value for it, or else error.
     public func Constant(_ type: NodeType) -> Node {
         return Node(idGen.generateId(), type, .Empty)
     }
