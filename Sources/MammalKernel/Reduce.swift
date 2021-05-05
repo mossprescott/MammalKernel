@@ -99,13 +99,14 @@ public enum Reduce {
         public func reduce(_ root: Node) -> (Node, SourceMap) {
             let lib = library.buildValues(root)
 
+            let allSourceIds = Set(Node.Util.descendants(of: root).keys)
             var reducedRootToSourceId: [NodeId: NodeId] = [:]
             func record(_ from: Node, reducedTo to: Node) {
                 if let previousResult = reducedRootToSourceId[from.id] {
                     reducedRootToSourceId.removeValue(forKey: from.id)
                     reducedRootToSourceId[to.id] = previousResult
                 }
-                else {
+                else if allSourceIds.contains(from.id) {
                     reducedRootToSourceId[to.id] = from.id
                 }
             }
