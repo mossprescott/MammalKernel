@@ -100,6 +100,15 @@ public enum Reduce {
             let lib = library.buildValues(root)
 
             var reducedRootToSourceId: [NodeId: NodeId] = [:]
+            func record(_ from: Node, reducedTo to: Node) {
+                if let previousResult = reducedRootToSourceId[from.id] {
+                    reducedRootToSourceId.removeValue(forKey: from.id)
+                    reducedRootToSourceId[to.id] = previousResult
+                }
+                else {
+                    reducedRootToSourceId[to.id] = from.id
+                }
+            }
 
             // If there is a reduction for the root node's type, run it and if it succeeds, then
             // return the result. If the reduction returns `nil` or a failure value, or actually
@@ -119,8 +128,7 @@ public enum Reduce {
                             print("Reduction returned an error: \(result)")
                             return nil
                         } else {
-                            // TODO: (always?) re-label nodes in the result to avoid any possible collisions. Deal with free and bound .Refs.
-                            reducedRootToSourceId[result.id] = node.id
+                            record(node, reducedTo: result)
                             return result
                         }
                     }
@@ -136,27 +144,31 @@ public enum Reduce {
 
             // Apply `reduce` to each child node and build up a new node with the results.
             func reduceChildren(_ node: Node) -> Node {
+                // TODO: detect when no reduction happens down the tree and avoid constructing
+                // new nodes when it's not necessary.
+
                 switch node.content {
                 case .Attrs(let attrs):
-                    let newId = IdGen.Shared.generateId()
-                    reducedRootToSourceId[newId] = node.id
-                    return Node(newId,
-                                node.type,
-                                .Attrs(attrs.mapValues { val in
-                        switch val {
-                        case .Prim(_):
-                            return val
-                        case .Node(let child):
-                            return .Node(loop(child))
-                        }
-                    }))
+                    let reducedAttrs: Node.Content = .Attrs(
+                        attrs.mapValues { val in
+                            switch val {
+                            case .Prim(_):
+                                return val
+                            case .Node(let child):
+                                return .Node(loop(child))
+                            }
+                        })
+                    let rebuilt = Node(IdGen.Shared.generateId(), node.type, reducedAttrs)
+                    record(node, reducedTo: rebuilt)
+                    return rebuilt
 
                 case .Elems(let elems):
-                    let newId = IdGen.Shared.generateId()
-                    reducedRootToSourceId[newId] = node.id
-                    return Node(newId,
-                                node.type,
-                                .Elems(elems.map(loop)))
+                    let reducedElems: Node.Content = .Elems(elems.map(loop))
+                    let rebuilt = Node(IdGen.Shared.generateId(),
+                                       node.type,
+                                       reducedElems)
+                    record(node, reducedTo: rebuilt)
+                    return rebuilt
 
                 case .Ref(_), .Empty:
                     return node
