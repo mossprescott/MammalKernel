@@ -118,13 +118,24 @@ public enum Reduce {
             // return the result. If the reduction returns `nil` or a failure value, or actually
             // throws, it's as if no reduction was found.
             func reduceNode(_ node: Node) -> Node? {
-                if let f = reducers[node.type] {
-                    let kernel = KernelGen()
-                    let pgm = kernel.App(fn: f, args: [
-                        kernel.Quote(body: node)
-                    ])
+                // Like Kernel.eval, but then match only a unary .Fn result (and yield the raw value)
+                func evalToFn1(_ lambdaNode: Node) throws -> ((Node) throws -> Eval.Value<Node.Value>) {
+                    let ast = Kernel.translate(lambdaNode, constants: lib)
+                    let result = try Eval.eval(ast, env: .Empty)
+                    switch result {
+                    case .Fn(arity: 1, let f):
+                        return { n in try f([.Val(.Node(n))]) }
+                    case .Fn(_, _):
+                        throw Eval.RuntimeError.ArityError(expected: 1, found: [result])  // Abusing the "found" field here
+                    default:
+                        throw Eval.RuntimeError.TypeError(expected: "unary Fn", found: result)
+                    }
+                }
+
+                if let fnNode = reducers[node.type] {
                     do {
-                        let result = try Kernel.eval(pgm, constants: lib)
+                        let fn = try evalToFn1(fnNode)
+                        let result = Kernel.repr(try fn(node))
                         if result.type == Kernel.Nil.type {
                             print("Reduction returned nil: \(node)")
                             return nil
