@@ -63,7 +63,8 @@ public enum Reduce {
     public enum Lib {
         private static let namespace = "reduce-lib"  // TODO: figure out naming
 
-        /// Resolve a reference to a node that's "in scope". Note: this can't be implemented statically, but has to be provided
+        /// Resolve a reference to a node that's "in scope". For now, that just means that it
+        /// exists in the (source) tree that's being reduced.
         public static let resolveRef = NodeType(namespace, "resolveRef")
     }
 
@@ -137,7 +138,7 @@ public enum Reduce {
                         let fn = try evalToFn1(fnNode)
                         let result = Kernel.repr(try fn(node))
                         if result.type == Kernel.Nil.type {
-                            print("Reduction returned nil: \(node)")
+//                            print("Reduction returned nil: \(node)")
                             return nil
                         } else if result.type == Kernel.Fail.type {
                             print("Reduction returned an error: \(result); \(node)")
