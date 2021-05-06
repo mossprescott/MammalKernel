@@ -25,10 +25,20 @@ public struct NodeId: Hashable {
 /// separated by a slash.
 /// For example, an integer literal in the kernel language has the type `"kernel/int"`.
 public struct NodeType: Hashable {
-    public var fullName: String
+    var language: String
+    var name: String
+
+    public var fullName: String {
+        language + "/" + name
+    }
+
+    public var simpleName: String {
+        name
+    }
 
     public init(_ language: String, _ name: String) {
-        self.fullName = language + "/" + name
+        self.language = language
+        self.name = name
     }
 }
 
