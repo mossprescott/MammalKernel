@@ -10,12 +10,14 @@ final class ReduceTests: XCTestCase {
     let fooParentType = NodeType("test", "fooParent")
     let childAttr = AttrName(fullName: "test/child")
 
+    let reduceNothing: Reduce.ReduceFn = { _, _ in nil }
+
     func testNoOp() throws {
         let pgm = Node(IdGen.Shared.generateId(),
                        fooType,
                        .Empty)
 
-        let reduction = Reduce.TopDown([:])
+        let reduction = Reduce.TopDown(reduceNothing)
 
         let (result, sourceMap) = reduction.reduce(pgm)
 
@@ -31,10 +33,10 @@ final class ReduceTests: XCTestCase {
                        fooType,
                        .Empty)
 
-        let reduction = Reduce.TopDown(
+        let reduction = Reduce.TopDown(Reduce.reduceByTypeWithKernel(
             [
                 fooType: trivialReduceFn(barType),
-            ])
+            ]))
 
         let (result, sourceMap) = reduction.reduce(pgm)
 
@@ -57,7 +59,7 @@ final class ReduceTests: XCTestCase {
                         childAttr: .Node(foo)
                        ]))
 
-        let reduction = Reduce.TopDown([:])
+        let reduction = Reduce.TopDown(reduceNothing)
 
         let (result, sourceMap) = reduction.reduce(pgm)
 
@@ -83,10 +85,10 @@ final class ReduceTests: XCTestCase {
                         childAttr: .Node(foo)
                        ]))
 
-        let reduction = Reduce.TopDown(
+        let reduction = Reduce.TopDown(Reduce.reduceByTypeWithKernel(
             [
                 fooType: trivialReduceFn(barType),
-            ])
+            ]))
 
         let expected = Node(IdGen.Shared.generateId(),
                             fooParentType,
@@ -122,7 +124,7 @@ final class ReduceTests: XCTestCase {
                        fooType,
                        .Empty)
 
-        let reduction = Reduce.TopDown(
+        let reduction = Reduce.TopDown(Reduce.reduceByTypeWithKernel(
             [
                 fooType: kernel.Lambda(arity: 1) { _, _ in
                     kernel.Quote(body:
@@ -134,7 +136,7 @@ final class ReduceTests: XCTestCase {
                                                          .Empty)
                                          ])))
                 },
-            ])
+            ]))
 
         let (result, sourceMap) = reduction.reduce(pgm)
 
@@ -151,7 +153,7 @@ final class ReduceTests: XCTestCase {
                        fooType,
                        .Empty)
 
-        let reduction = Reduce.TopDown(
+        let reduction = Reduce.TopDown(Reduce.reduceByTypeWithKernel(
             [
                 fooType: kernel.Lambda(arity: 1) { _, _ in
                     kernel.Quote(body:
@@ -164,7 +166,7 @@ final class ReduceTests: XCTestCase {
                                                            .Elems([]))),
                                          ])))
                 },
-            ])
+            ]))
 
         let (result, sourceMap) = reduction.reduce(pgm)
 
@@ -187,10 +189,10 @@ final class ReduceTests: XCTestCase {
                        fooParentType,
                        .Elems([foo1, foo2]))
 
-        let reduction = Reduce.TopDown(
+        let reduction = Reduce.TopDown(Reduce.reduceByTypeWithKernel(
             [
                 fooType: trivialReduceFn(barType),
-            ])
+            ]))
 
         let expected = Node(IdGen.Shared.generateId(),
                             fooParentType,
@@ -226,11 +228,11 @@ final class ReduceTests: XCTestCase {
                        fooType,
                        .Empty)
 
-        let reduction = Reduce.TopDown(
+        let reduction = Reduce.TopDown(Reduce.reduceByTypeWithKernel(
             [
                 fooType: trivialReduceFn(barType),
                 barType: trivialReduceFn(bazType),
-            ])
+            ]))
 
         let (result, sourceMap) = reduction.reduce(pgm)
 

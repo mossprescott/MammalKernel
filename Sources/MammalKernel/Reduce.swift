@@ -68,40 +68,46 @@ public enum Reduce {
         public static let resolveRef = NodeType(namespace, "resolveRef")
     }
 
-    /// The best and most well-supported form of reduction, which works on the tree in single-pass, top-down fashion, and
-    /// uses the node type to look up a single, authoritative reduction function.
-    public struct TopDown {
-        /// A kernel language program for each reducible node type. Each defines a unary function which will be called with
-        /// a node of the corresponding type. If the node is understood, the function returns an `expr` Node. If not, `nil` is returned
-        /// and it's up to the caller to figure out what to display. The result may contain descendant nodes which are not yet reduced.
-        public var reducers: [NodeType: Node]
+    public typealias ReduceFn = (Node, Context) throws -> Node?
 
-        /// A library of values which are available when each reduction is evaluated.
-        public var library: Library
+    /// Additional information that's provided to the reducing function along with the node to be
+    /// reduced.
+    public struct Context {
+        /// The root of the tree containing the node to be reduced.
+        var rootNode: Node
+    }
+
+    /// Apply a reduce function to the nodes of a tree in single-pass, top-down fashion.
+    public struct TopDown {
+        /// Reduce function to be applied to each node starting at the root. If the node is
+        /// understood, the function returns a new Node which is substituted into the tree, and
+        /// recorded in the `SourceMap`. The function is applied repeatedly until it no longer
+        /// performs any reduction before proceeding.
+        public var reduce: ReduceFn
 
         /// A hook to avoid hard-coding the NodeId generator.
         var generateId = IdGen.Shared.generateId
 
         // TODO: some kind of overridable handler for each error case that can be trapped
 
-        public init(_ reducers: [NodeType: Node], library: Library = Library.resolver) {
-            self.reducers = reducers
-            self.library = library
+        public init(_ reduce: @escaping ReduceFn) {
+            self.reduce = reduce
         }
 
-        /// Run reducers, starting at the root node, and then processing children recursively.
-        /// As long as the result node's type is found in `reducers`, it will be repeatedly reduced.
-        /// When the the node is no longer reduced (either there's no matching reducer, or the reducer returns `nil`),
+        /// Run the reducer, starting at the root node, and then processing children recursively.
+        /// As long as a reduced result is produced, the reducer is called repeatedly.
+        /// When the the node is no longer reduced (the reducer returns `nil` or fails),
         /// proceed with the children.
         ///
-        /// Reducers can return any well-formed tree. It is the responsibility of this function to ensure that the results are
-        /// assembled into a well-formed tree (for example, by re-labeling nodes to avoid id collisions.) TODO: what about "free" ref
-        /// nodes?
+        /// The reducer should produce nodes that result in a well-formed tree when they are
+        /// assembled along with unreduced source nodes. For example, separate calls to reduce
+        /// different nodes should result in results with distinct node ids, so that the result
+        /// is free of ambiguously-labeled nodes.
         ///
         /// TODO: some kind of arbitrary limit on how much reduction/expansion can happen, to
         /// interrupt non-terminating reductions.
         public func reduce(_ root: Node) -> (Node, SourceMap) {
-            let lib = library.buildValues(root)
+            let context = Context(rootNode: root)
 
             let allSourceIds = Set(Node.Util.descendantsById(of: root).keys)
             var reducedRootToSourceId: [NodeId: NodeId] = [:]
@@ -115,45 +121,21 @@ public enum Reduce {
                 }
             }
 
-            // If there is a reduction for the root node's type, run it and if it succeeds, then
-            // return the result. If the reduction returns `nil` or a failure value, or actually
-            // throws, it's as if no reduction was found.
+            // Run the reduce function on the node. If it succeeds, then record the now node's id
+            // and return it. If the reduction returns `nil` or throws, no more reduction is possible,
+            // and nil is returned..
             func reduceNode(_ node: Node) -> Node? {
-                // Like Kernel.eval, but then match only a unary .Fn result (and yield the raw value)
-                func evalToFn1(_ lambdaNode: Node) throws -> ((Node) throws -> Eval.Value<Node.Value>) {
-                    let ast = Kernel.translate(lambdaNode, constants: lib)
-                    let result = try Eval.eval(ast, env: .Empty)
-                    switch result {
-                    case .Fn(arity: 1, let f):
-                        return { n in try f([.Val(.Node(n))]) }
-                    case .Fn(_, _):
-                        throw Eval.RuntimeError.ArityError(expected: 1, found: [result])  // Abusing the "found" field here
-                    default:
-                        throw Eval.RuntimeError.TypeError(expected: "unary Fn", found: result)
+                do {
+                    if let result = try reduce(node, context) {
+                        record(node, reducedTo: result)
+                        return result
                     }
-                }
-
-                if let fnNode = reducers[node.type] {
-                    do {
-                        let fn = try evalToFn1(fnNode)
-                        let result = Kernel.repr(try fn(node))
-                        if result.type == Kernel.Nil.type {
-//                            print("Reduction returned nil: \(node)")
-                            return nil
-                        } else if result.type == Kernel.Fail.type {
-                            print("Reduction returned an error: \(result); \(node)")
-                            return nil
-                        } else {
-                            record(node, reducedTo: result)
-                            return result
-                        }
-                    }
-                    catch {
-                        print("Reduction threw an exception: \(error); \(node)")
+                    else {
                         return nil
                     }
                 }
-                else {
+                catch {
+                    print("Reduction threw an exception: \(error); \(node)")
                     return nil
                 }
             }
@@ -207,6 +189,52 @@ public enum Reduce {
     }
 
     // TODO: OneTime reduction, which is allowed to embed the source in its output without exploding
+
+    /// Build a `ReduceFn` out of a `kernel` program for each type; each program is a unary function
+    /// which attempts to reduce a node of the associated type.
+    public static func reduceByTypeWithKernel(_ reducers: [NodeType: Node], library: Library = Library.resolver) -> ReduceFn {
+        { node, context in
+            let lib = library.buildValues(context.rootNode)
+
+            // Like Kernel.eval, but then match only a unary .Fn result (and yield the raw value)
+            func evalToFn1(_ lambdaNode: Node) throws -> ((Node) throws -> Eval.Value<Node.Value>) {
+                let ast = Kernel.translate(lambdaNode, constants: lib)
+                let result = try Eval.eval(ast, env: .Empty)
+                switch result {
+                case .Fn(arity: 1, let f):
+                    return { n in try f([.Val(.Node(n))]) }
+                case .Fn(_, _):
+                    throw Eval.RuntimeError.ArityError(expected: 1, found: [result])  // Abusing the "found" field here
+                default:
+                    throw Eval.RuntimeError.TypeError(expected: "unary Fn", found: result)
+                }
+            }
+
+            if let fnNode = reducers[node.type] {
+                let fn = try evalToFn1(fnNode)
+                let result = try fn(node)
+                switch result {
+                case .Val(.Node(let node)):
+                    return node
+
+                case .Val(.Prim(.Nil)):
+                    return nil
+
+                case .Val(.Prim(_)):
+                    throw Eval.RuntimeError.TypeError(expected: "node", found: result)
+
+                case .Fn(_, _):
+                    throw Eval.RuntimeError.TypeError(expected: "node", found: result)
+
+                case .Error(let err):
+                    throw err
+                }
+            }
+            else {
+                return nil
+            }
+        }
+    }
 
 
 
