@@ -49,21 +49,27 @@ public struct NodeType: Hashable {
 /// For example, a "lambda" expression in the kernel language will have an attribute `"kernel/lambda/body"`
 /// which contains the expression which is the body of the function.
 public struct AttrName: Hashable {
+    var prefix: String
     var name: String
 
+    public var fullName: String {
+        prefix + "/" + name
+    }
+
+    public var simpleName: String {
+        name
+    }
+
     /// Compose an attribute name from a node type plus a unique short name
-    public init(_ parent: NodeType, _ shortName: String) {
-        self.name = parent.fullName + "/" + shortName
+    public init(_ parent: NodeType, _ name: String) {
+        self.prefix = parent.fullName
+        self.name = name
     }
 
     /// For attributes that are used with more than one type of node.
     public init(_ language: String, _ name: String) {
-        self.name = language + "/" + name
-    }
-
-    /// For attributes that aren't always used with a specific node type.
-    public init(fullName: String) {
-        self.name = fullName
+        self.prefix = language
+        self.name = name
     }
 }
 
