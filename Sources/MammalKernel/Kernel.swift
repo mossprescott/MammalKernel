@@ -490,6 +490,8 @@ public enum Kernel {
     /// Ordinary values are simply returned, but unevaluated functions and errors both get converted
     /// back to "expressions" that aren't very useful when evaluated.
     static func repr(_ value: Eval.Value<Node.Value>) -> Node {
+        let nextId = IdGen.Shared.generateId
+
         switch value {
         case .Val(.Node(let node)):
             return node
@@ -497,51 +499,41 @@ public enum Kernel {
         case .Val(.Prim(let prim)):
             switch prim {
             case .Nil:
-                return Node(freshNodeId(),
+                return Node(nextId(),
                             Nil.type,
                             .Empty)
 
             case .Bool(_):
-                return Node(freshNodeId(),
+                return Node(nextId(),
                             Bool_.type,
                             .Attrs([Bool_.value: .Prim(prim)]))
 
             case .Int(_):
-                return Node(freshNodeId(),
+                return Node(nextId(),
                             Int_.type,
                             .Attrs([Int_.value: .Prim(prim)]))
 
             case .String(_):
-                return Node(freshNodeId(),
+                return Node(nextId(),
                             String_.type,
                             .Attrs([String_.value: .Prim(prim)]))
             }
 
         case .Fn(let arity, _):
-            return Node(freshNodeId(),
+            return Node(nextId(),
                         Fn.type,
                         .Attrs([
                             Fn.arity: .Prim(.Int(arity))
                         ]))
 
         case .Error(let err):
-            return Node(freshNodeId(),
+            return Node(nextId(),
                         Error.type,
                         .Attrs([
                             Error.description: .Prim(.String(String(describing: err)))
                         ]))
         }
     }
-
-// MARK: - NodeId generation
-
-    /// BOGUS: there might be a correct way to do this, but this sure ain't it.
-    static func freshNodeId() -> NodeId {
-        let id = nextId
-        nextId = nextId + 1
-        return NodeId(id)
-    }
-    private static var nextId: Swift.Int = 1000
 
 
 // MARK: - Node types and attribute names
