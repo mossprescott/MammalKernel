@@ -21,7 +21,7 @@ public struct Zipper {
     /// Must be a _strict, weak ordering_ over the attribute names (see `Collection.sort(by:)`)
     public typealias AttrsInIncreasingOrder = (NodeType, AttrName, AttrName) -> Bool
 
-    var attrOrder: AttrsInIncreasingOrder
+    public var attrOrder: AttrsInIncreasingOrder
 
 
     public init(_ node: Node, attrOrder: @escaping AttrsInIncreasingOrder) {
