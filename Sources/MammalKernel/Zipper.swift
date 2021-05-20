@@ -143,7 +143,7 @@ public struct Zipper {
         case .elem(let id, let type, let left, let parentPath, let right):
             if let nextNode = right.first {
                 return Zipper(nextNode,
-                              .elem(id, type, left + [node], parentPath, Array(right[1...])),
+                              .elem(id, type, [node] + left, parentPath, Array(right[1...])),
                               attrOrder: attrOrder)
             }
             else {
