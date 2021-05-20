@@ -8,7 +8,7 @@ final class ReduceTests: XCTestCase {
     let barType = NodeType("test", "bar")
     let bazType = NodeType("test", "baz")
     let fooParentType = NodeType("test", "fooParent")
-    let childAttr = AttrName(fullName: "test/child")
+    let childAttr = AttrName("test", "child")
 
     let reduceNothing: Reduce.ReduceFn = { _, _ in nil }
 
