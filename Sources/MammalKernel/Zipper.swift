@@ -50,13 +50,13 @@ public struct Zipper {
 
 // MARK: - Navigation
 
-    /// Rebuild the root node.
-    public func root() -> Node {
+    /// Move focus to the root of the tree.
+    public func root() -> Zipper {
         if let parent = up() {
             return parent.root()
         }
         else {
-            return node
+            return self
         }
     }
 
@@ -78,6 +78,8 @@ public struct Zipper {
 
     /// Move focus to the previous sibling node, if any. If the location is within a set of named attributes, the supplied comparator is
     /// applied to determine the effective order.
+    ///
+    /// Note: this is usually called "left", but in the case of ASTs, siblings are laid out vertically as often as horizontally on screen.
     public func previous() -> Zipper? {
         switch path {
         case .top:
@@ -116,6 +118,8 @@ public struct Zipper {
 
     /// Move focus to the next sibling node, if any. If the location is within a set of named attributes, the supplied comparator is
     /// applied to determine the effective order.
+    ///
+    /// Note: this is usually called "right", but in the case of ASTs, siblings are laid out vertically as often as horizontally on screen.
     public func next() -> Zipper? {
         switch path {
         case .top:
@@ -185,6 +189,46 @@ public struct Zipper {
     /// Move focus to a particular child node by attribute name.
     public func attr(_ attrName: AttrName) -> Zipper? {
         fatalError("TODO")
+    }
+
+    /// Move focus "down or to the the right" in such a way that, when called repeatedly starting at the root, all nodes are visited in
+    /// pre-order (that is, parents followed by children.)
+    public func nextInPreorder() -> Zipper? {
+        func findNext(_ loc: Zipper, tryDown: Bool) -> Zipper? {
+            if tryDown, let child = loc.down() {
+                return child
+            }
+            else if let sibling = loc.next() {
+                return sibling
+            }
+            else if let parent = loc.up() {
+                return findNext(parent, tryDown: false)
+            }
+            else {
+                return nil
+            }
+        }
+        return findNext(self, tryDown: true)
+    }
+
+    /// Sequence of all locations within the tree, starting from the root, in pre-order (according to `attrOrder`).
+    public func all() -> ZipperSequence {
+        return ZipperSequence(nextLoc: root())
+    }
+
+    /// Stateful iterator over all the locations in the tree. See `nextInPreorder.`
+    public struct ZipperSequence: Sequence, IteratorProtocol {
+        var nextLoc: Zipper?
+
+        public mutating func next() -> Zipper? {
+            if let result = nextLoc {
+                nextLoc = result.nextInPreorder()
+                return result
+            }
+            else {
+                return nil
+            }
+        }
     }
 
     /// The attribute values which are nodes, ordered according to `attrOrder`.

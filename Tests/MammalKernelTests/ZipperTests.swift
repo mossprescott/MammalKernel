@@ -8,18 +8,16 @@ final class ZipperTests: XCTestCase {
                        fooType,
                        .Empty)
 
-        let zipper = Zipper(pgm, attrOrder: byName)
+        let fooLoc = Zipper(pgm, attrOrder: byName)
 
-        let expected = pgm
+        XCTAssertEqual(Diff.changes(from: pgm, to: fooLoc.root().node), [])
 
-        let result = zipper.root()
+        XCTAssertNil(fooLoc.previous())
+        XCTAssertNil(fooLoc.next())
+        XCTAssertNil(fooLoc.up())
+        XCTAssertNil(fooLoc.down())
 
-        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
-
-        XCTAssertNil(zipper.previous())
-        XCTAssertNil(zipper.next())
-        XCTAssertNil(zipper.up())
-        XCTAssertNil(zipper.down())
+        XCTAssertEqual(fooLoc.all().map { $0.node.type }, [fooType])
     }
 
     func testSimpleElems() throws {
@@ -36,7 +34,7 @@ final class ZipperTests: XCTestCase {
 
         let fooLoc = Zipper(pgm, attrOrder: byName)
 
-        XCTAssertEqual(Diff.changes(from: pgm, to: fooLoc.root()), [])
+        XCTAssertEqual(Diff.changes(from: pgm, to: fooLoc.root().node), [])
         XCTAssertEqual(Diff.changes(from: pgm, to: fooLoc.node), [])
 
         let barLoc = fooLoc.down()!
@@ -53,7 +51,9 @@ final class ZipperTests: XCTestCase {
         let barLoc2 = bazLoc.previous()!
         XCTAssertEqual(barLoc2.node.type, barType)
 
-        XCTAssertEqual(Diff.changes(from: pgm, to: barLoc2.root()), [])
+        XCTAssertEqual(Diff.changes(from: pgm, to: barLoc2.root().node), [])
+
+        XCTAssertEqual(fooLoc2.all().map { $0.node.type }, [fooType, barType, bazType])
     }
 
     func testSimpleAttrs() throws {
@@ -74,7 +74,7 @@ final class ZipperTests: XCTestCase {
 
         let fooLoc = Zipper(pgm, attrOrder: byName)
 
-        XCTAssertEqual(Diff.changes(from: pgm, to: fooLoc.root()), [])
+        XCTAssertEqual(Diff.changes(from: pgm, to: fooLoc.root().node), [])
         XCTAssertEqual(Diff.changes(from: pgm, to: fooLoc.node), [])
 
         let barLoc = fooLoc.down()!
@@ -91,7 +91,9 @@ final class ZipperTests: XCTestCase {
         let barLoc2 = bazLoc.previous()!
         XCTAssertEqual(barLoc2.node.type, barType)
 
-        XCTAssertEqual(Diff.changes(from: pgm, to: barLoc2.root()), [])
+        XCTAssertEqual(Diff.changes(from: pgm, to: barLoc2.root().node), [])
+
+        XCTAssertEqual(fooLoc2.all().map { $0.node.type }, [fooType, barType, bazType])
     }
 
     let fooType = NodeType("test", "foo")
