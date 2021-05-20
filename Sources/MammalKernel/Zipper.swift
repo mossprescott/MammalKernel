@@ -203,56 +203,53 @@ public struct Zipper {
 // MARK: - Mutation
 
     /// Replace the node at the location (and its decendants) entirely.
-    public func replace(_ newNode: Node) -> Zipper {
-        return Zipper(newNode, path, attrOrder: attrOrder)
+    public mutating func replace(_ newNode: Node) {
+        node = newNode
     }
 
     /// Replace the NodeId at the location with a newly-generated id, which will therefore be unique with respect to all ids currently
     /// present.
-    public func resetId() -> Zipper {
+    public mutating func resetId() {
         replace(Node(IdGen.Shared.generateId(), node.type, node.content))
     }
 
     /// Modify the NodeType at the location, preserving the id and content.
-    public func setType(_ newType: NodeType) -> Zipper {
+    public mutating func setType(_ newType: NodeType) {
         replace(Node(node.id, newType, node.content))
     }
 
     /// Works only on .Attrs locations.
-    public func setAttr(_ attr: AttrName, _ newValue: Node.Value) -> Zipper? {
+    public mutating func setAttr(_ attr: AttrName, _ newValue: Node.Value) {
         if case .Attrs(let attrs) = node.content {
             var newAttrs = attrs
             newAttrs[attr] = newValue
-            return replace(Node(node.id, node.type, .Attrs(newAttrs)))
-        }
-        else {
-            return nil
+            replace(Node(node.id, node.type, .Attrs(newAttrs)))
         }
     }
 
     /// Works only on .Ref locations.
-    public func setTarget(_ newTarget: NodeId) -> Zipper? {
+    public mutating func setTarget(_ newTarget: NodeId) {
         fatalError("TODO")
     }
 
     /// Insert a new sibling before the current location, and move the focus to the new node. Works only on .Elems locations.
-    public func insertBefore(_ newNode: Node) -> Zipper? {
+    public mutating func insertBefore(_ newNode: Node) {
         fatalError("TODO")
     }
 
     /// Insert a new sibling after the current location, and move the focus to the new node. Works only on .Elems locations.
-    public func insertAfter(_ newNode: Node) -> Zipper? {
+    public mutating func insertAfter(_ newNode: Node) {
         fatalError("TODO")
     }
 
     /// TODO: where to leave the location? previous sibling; next sibling; parent?
-    public func delete() -> Zipper? {
+    public mutating func delete() {
         fatalError("TODO")
     }
 
     /// Delete the value under a certain attribute name at the location. Note, this is the only way to delete a non-Node value; if the
     /// Works only on .Attrs locations.
-    public func deleteAttr(_ attr: AttrName) -> Zipper? {
+    public mutating func deleteAttr(_ attr: AttrName) {
         fatalError("TODO")
     }
 }
