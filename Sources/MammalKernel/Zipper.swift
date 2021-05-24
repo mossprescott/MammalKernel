@@ -249,8 +249,15 @@ public struct Zipper {
     }
 
 // MARK: - Mutation
+    /*
+     Of course none of these methods truly mutate anything, since both Zippers and the underlying
+     Nodes are immutable. Therefore it's a question of style whether to use `mutating` functions
+     (forcing the use of `var`) or just build new Zipper values and return them.
 
-    /// Replace the node at the location (and its decendants) entirely.
+     For now, following the Swift library's practice for its immutable structs.
+     */
+
+    /// Replace the node at the location (and its descendants) entirely.
     public mutating func replace(_ newNode: Node) {
         node = newNode
     }
