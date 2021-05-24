@@ -83,23 +83,23 @@ public enum Reduce {
         /// understood, the function returns a new Node which is substituted into the tree, and
         /// recorded in the `SourceMap`. The function is applied repeatedly until it no longer
         /// performs any reduction before proceeding.
-        public var reduce: ReduceFn
+        public var reduceFn: ReduceFn
 
         /// A hook to avoid hard-coding the NodeId generator.
         var generateId = IdGen.Shared.generateId
 
         // TODO: some kind of overridable handler for each error case that can be trapped
 
-        public init(_ reduce: @escaping ReduceFn) {
-            self.reduce = reduce
+        public init(_ reduceFn: @escaping ReduceFn) {
+            self.reduceFn = reduceFn
         }
 
-        /// Run the reducer, starting at the root node, and then processing children recursively.
-        /// As long as a reduced result is produced, the reducer is called repeatedly.
-        /// When the the node is no longer reduced (the reducer returns `nil` or fails),
+        /// Run the reduceFn starting at the root node and then processing children recursively.
+        /// As long as a reduced result is produced, the reduceFn is called repeatedly.
+        /// When the the node is no longer reduced (the reduceFn returns `nil` or fails),
         /// proceed with the children.
         ///
-        /// The reducer should produce nodes that result in a well-formed tree when they are
+        /// The reduceFn should produce nodes that result in a well-formed tree when they are
         /// assembled along with unreduced source nodes. For example, separate calls to reduce
         /// different nodes should result in results with distinct node ids, so that the result
         /// is free of ambiguously-labeled nodes.
@@ -121,12 +121,12 @@ public enum Reduce {
                 }
             }
 
-            // Run the reduce function on the node. If it succeeds, then record the now node's id
+            // Run the reduce function on the node. If it succeeds, then record the new node's id
             // and return it. If the reduction returns `nil` or throws, no more reduction is possible,
             // and nil is returned..
             func reduceNode(_ node: Node) -> Node? {
                 do {
-                    if let result = try reduce(node, context) {
+                    if let result = try reduceFn(node, context) {
                         record(node, reducedTo: result)
                         return result
                     }
@@ -140,42 +140,61 @@ public enum Reduce {
                 }
             }
 
-            // Apply `reduce` to each child node and build up a new node with the results.
-            func reduceChildren(_ node: Node) -> Node {
-                // TODO: detect when no reduction happens down the tree and avoid constructing
-                // new nodes when it's not necessary.
-
+            // Apply `reduce` to each child node and build up a new node with the results. If no
+            // reduction occurs down the tree, then nil.
+            func reduceChildren(_ node: Node) -> Node? {
                 switch node.content {
                 case .Attrs(let attrs):
-                    let reducedAttrs: Node.Content = .Attrs(
-                        attrs.mapValues { val in
-                            switch val {
-                            case .Prim(_):
-                                return val
-                            case .Node(let child):
-                                return .Node(loop(child))
-                            }
-                        })
-                    let rebuilt = Node(generateId(), node.type, reducedAttrs)
-                    record(node, reducedTo: rebuilt)
-                    return rebuilt
+                    let (newAttrs, changed): ([(AttrName, Node.Value)], Bool) = attrs.reduce(([], false)) { previousResult, entry in
+                        if case .Node(let child) = entry.value, let newChild = loop(child) {
+                            return (previousResult.0 + [(entry.key, .Node(newChild))], true)
+                        }
+                        else {
+                            return (previousResult.0 + [(entry.key, entry.value)], previousResult.1)
+                        }
+                    }
+                    if changed {
+                        let rebuilt = Node(generateId(),
+                                           node.type,
+                                           .Attrs(Dictionary(uniqueKeysWithValues: newAttrs)))
+                        record(node, reducedTo: rebuilt)
+                        return rebuilt
+                    }
+                    else {
+                        return nil
+                    }
 
                 case .Elems(let elems):
-                    let reducedElems: Node.Content = .Elems(elems.map(loop))
-                    let rebuilt = Node(generateId(),
-                                       node.type,
-                                       reducedElems)
-                    record(node, reducedTo: rebuilt)
-                    return rebuilt
+                    let (newElems, changed): ([Node], Bool) = elems.reduce(([], false)) { previousResult, child in
+                        if let newChild = loop(child) {
+                            return (previousResult.0 + [newChild], true)
+                        }
+                        else {
+                            return (previousResult.0 + [child], previousResult.1)
+                        }
+                    }
+                    if changed {
+                        let rebuilt = Node(generateId(),
+                                           node.type,
+                                           .Elems(newElems))
+                        record(node, reducedTo: rebuilt)
+                        return rebuilt
+                    }
+                    else {
+                        return nil
+                    }
 
                 case .Ref(_), .Empty:
-                    return node
+                    return nil
                 }
             }
 
-            func loop(_ node: Node) -> Node {
+            // Reduce at the root of a sub-tree, repeatedly, then proceed with the children. If no
+            // reduction happens anywhere, then nil.
+            func loop(_ node: Node) -> Node? {
                 if let reduced = reduceNode(node) {
-                    return loop(reduced)
+                    // Tricky:
+                    return loop(reduced) ?? reduced
                 }
                 else {
                     return reduceChildren(node)
@@ -184,7 +203,7 @@ public enum Reduce {
 
             let reducedRoot = loop(root)
 
-            return (reducedRoot, SourceMap(sourceIds: reducedRootToSourceId))
+            return (reducedRoot ?? root, SourceMap(sourceIds: reducedRootToSourceId))
         }
     }
 
@@ -195,6 +214,8 @@ public enum Reduce {
     public static func reduceByTypeWithKernel(_ reducers: [NodeType: Node], library: Library = Library.resolver) -> ReduceFn {
         { node, context in
             let lib = library.buildValues(context.rootNode)
+
+//            print("lib: \(lib.keys)")
 
             // Like Kernel.eval, but then match only a unary .Fn result (and yield the raw value)
             func evalToFn1(_ lambdaNode: Node) throws -> ((Node) throws -> Eval.Value<Node.Value>) {

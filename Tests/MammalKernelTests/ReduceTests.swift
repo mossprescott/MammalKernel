@@ -48,8 +48,7 @@ final class ReduceTests: XCTestCase {
     }
 
     /// No new nodes, even when there is a child present.
-    #warning("Pending test skipped in Xcode")
-    func _pending_testNoOpWithChild() throws {
+    func testNoOpWithAttr() throws {
         let foo = Node(IdGen.Shared.generateId(),
                        fooType,
                        .Empty)
@@ -57,6 +56,32 @@ final class ReduceTests: XCTestCase {
                        fooParentType,
                        .Attrs([
                         childAttr: .Node(foo)
+                       ]))
+
+        let reduction = Reduce.TopDown(reduceNothing)
+
+        let (result, sourceMap) = reduction.reduce(pgm)
+
+        XCTAssertEqual(result.id, pgm.id)
+        XCTAssertEqual(result.type, fooParentType)
+
+        XCTAssertEqual(Node.Util.children(of: result).map(\.id), [foo.id])
+        XCTAssertEqual(Node.Util.children(of: result).map(\.type), [fooType])
+
+        XCTAssertTrue(sourceMap.sourceIds.isEmpty)
+
+        try checkInvariants(pgm: pgm, result: result, sourceMap)
+    }
+
+    /// No new nodes, even when there is a child present.
+    func testNoOpWithElem() throws {
+        let foo = Node(IdGen.Shared.generateId(),
+                       fooType,
+                       .Empty)
+        let pgm = Node(IdGen.Shared.generateId(),
+                       fooParentType,
+                       .Elems([
+                        foo
                        ]))
 
         let reduction = Reduce.TopDown(reduceNothing)
@@ -113,7 +138,58 @@ final class ReduceTests: XCTestCase {
         XCTAssertNotEqual(result.id, pgm.id,
                           "the rebuilt root node gets a fresh id")
         XCTAssertEqual(sourceMap.sourceIds[result.id], pgm.id,
-                      "the rebuit root node maps to the original root")
+                      "the rebuilt root node maps to the original root")
+
+        try checkInvariants(pgm: pgm, result: result, sourceMap)
+    }
+
+    /// A parent node is replaced, keeping the children intact.
+    func testReplaceParent() throws {
+        let foo = Node(IdGen.Shared.generateId(),
+                       fooType,
+                       .Empty)
+        let pgm = Node(IdGen.Shared.generateId(),
+                       fooParentType,
+                       .Attrs([
+                        childAttr: .Node(foo)
+                       ]))
+
+        let newParentType = NodeType("test", "foo2")
+
+        let reduction = Reduce.TopDown { [self] node, _ in
+            if node.type == fooParentType {
+                return Node(IdGen.Shared.generateId(),
+                            newParentType,
+                            node.content)
+            }
+            else {
+                return nil
+            }
+        }
+
+        let expected = Node(IdGen.Shared.generateId(),
+                            newParentType,
+                            .Attrs([
+                                childAttr: .Node(
+                                    Node(IdGen.Shared.generateId(),
+                                         fooType,
+                                         .Empty)),
+                            ]))
+
+        let (result, sourceMap) = reduction.reduce(pgm)
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
+
+        XCTAssertTrue(
+            Node.Util.children(of: result).allSatisfy { child in
+                !sourceMap.sourceIds.keys.contains(child.id)
+            },
+            "the child does not appear in the source map")
+
+        XCTAssertNotEqual(result.id, pgm.id,
+                          "the rebuilt root node gets a fresh id")
+        XCTAssertEqual(sourceMap.sourceIds[result.id], pgm.id,
+                      "the rebuilt root node maps to the original root")
 
         try checkInvariants(pgm: pgm, result: result, sourceMap)
     }
@@ -300,8 +376,10 @@ final class ReduceTests: XCTestCase {
     static var allTests = [
         ("testNoOp", testNoOp),
         ("testSimpleReplace", testSimpleReplace),
-        ("testNoOpWithChild", _pending_testNoOpWithChild),
+        ("testNoOpWithAttr", testNoOpWithAttr),
+        ("testNoOpWithElem", testNoOpWithElem),
         ("testReplaceChild", testReplaceChild),
+        ("testReplaceParent", testReplaceParent),
         ("testSimpleExpand", testSimpleExpand),
         ("testExpandDeep", testExpandDeep),
         ("testParallelReplace", _pending_testParallelReplace),
