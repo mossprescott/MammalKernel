@@ -23,6 +23,10 @@ public struct Zipper {
 
     public var attrOrder: AttrsInIncreasingOrder
 
+    /// An ordering of attributes which meets the requirements but doesn't satisfy user expectations.
+    public static let arbitraryOrder: AttrsInIncreasingOrder = { _, x, y in
+        x.fullName < y.fullName
+    }
 
     public init(_ node: Node, attrOrder: @escaping AttrsInIncreasingOrder) {
         self.node = node
