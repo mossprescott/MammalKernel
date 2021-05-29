@@ -42,7 +42,7 @@ final class ReduceTests: XCTestCase {
 
         XCTAssertNotEqual(result.id, pgm.id)
         XCTAssertEqual(result.type, barType)
-        XCTAssertEqual(sourceMap.sourceIds[result.id], pgm.id)
+        XCTAssertEqual(sourceMap.sourceId(forReducedId: result.id), pgm.id)
 
         try checkInvariants(pgm: pgm, result: result, sourceMap)
     }
@@ -68,7 +68,7 @@ final class ReduceTests: XCTestCase {
         XCTAssertEqual(Node.Util.children(of: result).map(\.id), [foo.id])
         XCTAssertEqual(Node.Util.children(of: result).map(\.type), [fooType])
 
-        XCTAssertTrue(sourceMap.sourceIds.isEmpty)
+        XCTAssertTrue(sourceMap.isEmpty)
 
         try checkInvariants(pgm: pgm, result: result, sourceMap)
     }
@@ -94,7 +94,7 @@ final class ReduceTests: XCTestCase {
         XCTAssertEqual(Node.Util.children(of: result).map(\.id), [foo.id])
         XCTAssertEqual(Node.Util.children(of: result).map(\.type), [fooType])
 
-        XCTAssertTrue(sourceMap.sourceIds.isEmpty)
+        XCTAssertTrue(sourceMap.isEmpty)
 
         try checkInvariants(pgm: pgm, result: result, sourceMap)
     }
@@ -130,14 +130,14 @@ final class ReduceTests: XCTestCase {
 
         XCTAssertEqual(
             Node.Util.children(of: result).map { child in
-                sourceMap.sourceIds[child.id]
+                sourceMap.sourceId(forReducedId: child.id)
             },
             Node.Util.children(of: pgm).map(\.id),
             "the child maps to the corresponding source node")
 
         XCTAssertNotEqual(result.id, pgm.id,
                           "the rebuilt root node gets a fresh id")
-        XCTAssertEqual(sourceMap.sourceIds[result.id], pgm.id,
+        XCTAssertEqual(sourceMap.sourceId(forReducedId: result.id), pgm.id,
                       "the rebuilt root node maps to the original root")
 
         try checkInvariants(pgm: pgm, result: result, sourceMap)
@@ -182,13 +182,13 @@ final class ReduceTests: XCTestCase {
 
         XCTAssertTrue(
             Node.Util.children(of: result).allSatisfy { child in
-                !sourceMap.sourceIds.keys.contains(child.id)
+                sourceMap.sourceId(forReducedId: child.id) == nil
             },
             "the child does not appear in the source map")
 
         XCTAssertNotEqual(result.id, pgm.id,
                           "the rebuilt root node gets a fresh id")
-        XCTAssertEqual(sourceMap.sourceIds[result.id], pgm.id,
+        XCTAssertEqual(sourceMap.sourceId(forReducedId: result.id), pgm.id,
                       "the rebuilt root node maps to the original root")
 
         try checkInvariants(pgm: pgm, result: result, sourceMap)
@@ -253,8 +253,7 @@ final class ReduceTests: XCTestCase {
     }
 
     /// Two children going from `foo` to `bar` side-by-side; requires relabeling during quote expansion.
-    #warning("Pending test skipped in Xcode")
-    func _pending_testParallelReplace() throws {
+    func testParallelReplace() throws {
         let foo1 = Node(IdGen.Shared.generateId(),
                        fooType,
                        .Empty)
@@ -289,11 +288,11 @@ final class ReduceTests: XCTestCase {
         // resulted from the same quoted node):
         XCTAssertEqual(
             Node.Util.children(of: result).map { child in
-                sourceMap.sourceIds[child.id]
+                sourceMap.sourceId(forReducedId: child.id)
             },
             Node.Util.children(of: pgm).map(\.id))
 
-        XCTAssertEqual(sourceMap.sourceIds[result.id], pgm.id)
+        XCTAssertEqual(sourceMap.sourceId(forReducedId: result.id), pgm.id)
 
         try checkInvariants(pgm: pgm, result: result, sourceMap)
     }
@@ -314,7 +313,7 @@ final class ReduceTests: XCTestCase {
 
         XCTAssertNotEqual(result.id, pgm.id)
         XCTAssertEqual(result.type, bazType)
-        XCTAssertEqual(sourceMap.sourceIds[result.id], pgm.id)
+        XCTAssertEqual(sourceMap.sourceId(forReducedId: result.id), pgm.id)
 
         try checkInvariants(pgm: pgm, result: result, sourceMap)
     }
@@ -339,29 +338,33 @@ final class ReduceTests: XCTestCase {
 //        }
 
         if result.id != pgm.id {
-            XCTAssertEqual(sourceMap.sourceIds[result.id], pgm.id,
+            XCTAssertEqual(sourceMap.sourceId(forReducedId: result.id), pgm.id,
                            "result root is mapped to the source root",
                            file: file, line: line)
         }
 
-        let sourceIds = Set(sourceMap.sourceIds.values)
+        let sourceIds = Set(sourceMap.reducedRootIds.compactMap { sourceMap.sourceId(forReducedId: $0) })
         let pgmNodeIds = Set(Node.Util.descendantsById(of: pgm).keys)
         XCTAssertTrue(sourceIds.isSubset(of: pgmNodeIds),
                        "every value of sourceMap is a node in the source tree",
                        file: file, line: line)
 
-        let reducedRootIds = Set(sourceMap.sourceIds.keys)
         let outputNodeIds = Set(Node.Util.descendantsById(of: result).keys)
-        XCTAssertTrue(reducedRootIds.isSubset(of: outputNodeIds),
+        XCTAssertTrue(sourceMap.reducedRootIds.isSubset(of: outputNodeIds),
                        "every key of sourceMap is a node in the output tree",
                        file: file, line: line)
 
-        XCTAssertTrue(reducedRootIds.isDisjoint(with: pgmNodeIds),
+        XCTAssertTrue(sourceMap.reducedRootIds.isDisjoint(with: pgmNodeIds),
                       "every key of sourceMap is a new node (doesn't appear in the source)")
+
+        // TODO: if any result node has the same id as a source node, then it *is* that node, down
+        // to every id and attribute of every descendant.
 
         // TODO: output is well-formed:
         // - no duplicate ids (... unless they are replicated source nodes)
         // - no dangling refs (...?)
+
+
     }
 
     private func trivialReduceFn(_ type: NodeType) -> Node {
@@ -382,7 +385,7 @@ final class ReduceTests: XCTestCase {
         ("testReplaceParent", testReplaceParent),
         ("testSimpleExpand", testSimpleExpand),
         ("testExpandDeep", testExpandDeep),
-        ("testParallelReplace", _pending_testParallelReplace),
+        ("testParallelReplace", testParallelReplace),
         ("testChain", testChain),
     ]
 }

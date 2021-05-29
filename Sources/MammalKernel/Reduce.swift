@@ -29,12 +29,24 @@ public enum Reduce {
         /// Each key is the id of a unique node in the output program; the value is the id of the source node from which the node was
         /// derived. That is, each time a reduction consumes a source node, the id of the node which is the root of the resulting
         /// sub-tree is recorded.
-        ///
-        /// Note: the relation is many-to-one: it's expected that reduction will often result in several output nodes mapping back the
-        /// to the same source node, but there is always a unique source node identified for each output node.
-        ///
-        ///
-        public var sourceIds: [NodeId: NodeId]
+        var reducedIdToSourceId: [NodeId: NodeId]
+
+        /// True if no node was reduced; every node in the result is identical to one in the source.
+        public var isEmpty: Bool {
+            reducedIdToSourceId.isEmpty
+        }
+
+        /// Ids of all the reduced "roots", each of which is the sub-tree which resulted from reducing a single source node.
+        public var reducedRootIds: Set<NodeId> {
+            Set(reducedIdToSourceId.keys)
+        }
+
+        /// Given the id of a node in the reduced result, look up the id of the corresponding node in the source tree. That is, find the
+        /// id of the node in the source which was consumed by a `ReduceFn`, the result of which was a "reduced" node having the
+        /// presented id.
+        public func sourceId(forReducedId id: NodeId) -> NodeId? {
+            reducedIdToSourceId[id]
+        }
     }
 
     /// A collection of values that will be made available when reductions are being evaluated. To refer to one of them, just
@@ -68,6 +80,12 @@ public enum Reduce {
         public static let resolveRef = NodeType(namespace, "resolveRef")
     }
 
+    /// A function which may or may not "reduce" a single node at a time.
+    ///
+    /// Note: the result node should always contain all "fresh" node ids, to avoid id collisions when the function is applied to another
+    /// node. That's not very FP, but it's what we've got for now. If the fn is actually a `kernel/lambda` being applied to the node,
+    /// and expanding a `kernel/quote` to produce its result, then this is taken care of by the node re-naming that happens during
+    /// quote expansion.
     public typealias ReduceFn = (Node, Context) throws -> Node?
 
     /// Additional information that's provided to the reducing function along with the node to be
@@ -76,6 +94,8 @@ public enum Reduce {
         /// The root of the tree containing the node to be reduced.
         var rootNode: Node
     }
+
+// MARK: -TopDown
 
     /// Apply a reduce function to the nodes of a tree in single-pass, top-down fashion.
     public struct TopDown {
@@ -95,7 +115,7 @@ public enum Reduce {
         }
 
         /// Run the reduceFn starting at the root node and then processing children recursively.
-        /// As long as a reduced result is produced, the reduceFn is called repeatedly.
+        /// As long as a result is produced, the reduceFn is called repeatedly.
         /// When the the node is no longer reduced (the reduceFn returns `nil` or fails),
         /// proceed with the children.
         ///
@@ -112,6 +132,7 @@ public enum Reduce {
             let allSourceIds = Set(Node.Util.descendantsById(of: root).keys)
             var reducedRootToSourceId: [NodeId: NodeId] = [:]
             func record(_ from: Node, reducedTo to: Node) {
+                print("reduced: \(from.id.id) -> \(to.id.id)")
                 if let previousResult = reducedRootToSourceId[from.id] {
                     reducedRootToSourceId.removeValue(forKey: from.id)
                     reducedRootToSourceId[to.id] = previousResult
@@ -126,7 +147,11 @@ public enum Reduce {
             // and nil is returned..
             func reduceNode(_ node: Node) -> Node? {
                 do {
-                    if let result = try reduceFn(node, context) {
+                    if var result = try reduceFn(node, context) {
+                        // The result node might occur more than once, and we need to track each one
+                        // independently (e.g. multiple `nil`s in the source program, each reduced
+                        // to the same string for display). So just relabel the root no matter what.
+                        result.id = generateId()
                         record(node, reducedTo: result)
                         return result
                     }
@@ -203,11 +228,12 @@ public enum Reduce {
 
             let reducedRoot = loop(root)
 
-            return (reducedRoot ?? root, SourceMap(sourceIds: reducedRootToSourceId))
+            return (reducedRoot ?? root, SourceMap(reducedIdToSourceId: reducedRootToSourceId))
         }
     }
 
-    // TODO: OneTime reduction, which is allowed to embed the source in its output without exploding
+
+// MARK: -Utilities
 
     /// Build a `ReduceFn` out of a `kernel` program for each type; each program is a unary function
     /// which attempts to reduce a node of the associated type.
@@ -257,6 +283,27 @@ public enum Reduce {
         }
     }
 
+    /// Run one reduction, followed by another, tracking sources through both reductions.
+    public static func compose(_ f: @escaping Reduction, _ g: @escaping Reduction) -> Reduction {
+        return { node in
+            let (reduced1, srcMap1) = f(node)
+            let (reduced2, srcMap2) = g(reduced1)
+
+            var srcMap = srcMap1.reducedIdToSourceId
+            for (rId, sId) in srcMap2.reducedIdToSourceId {
+                if let previousSourceId = srcMap1.sourceId(forReducedId: sId) {
+                    srcMap.removeValue(forKey: sId)
+                    srcMap[rId] = previousSourceId
+                }
+                else {
+                    srcMap[rId] = sId
+                }
+            }
+            let srcMapCombined: Reduce.SourceMap = SourceMap(reducedIdToSourceId: srcMap)
+
+            return (reduced2, srcMapCombined)
+        }
+    }
 
 
 // MARK: -Internals

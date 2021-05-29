@@ -221,8 +221,10 @@ public enum Kernel {
 // MARK: - Quotation
 
     /// Expand a node which appeared inside a `Quote` node's body, in a particular environment during evaluation.
-    /// The structure of the node is inspected: if it is an `Unquote`, its `expr` is evaluated and substituted. Otherwise any child
-    /// nodes are subjected to the same scrutiny.
+    /// The structure of the node is inspected: if it is an `Unquote`, its `expr` is evaluated and substituted. If it's an
+    /// `UnquoteSplice`, its expr is evaluated, and the chlidren of the resulting node (which must be `Elems`) are spliced into
+    /// the current position (which must also be withint `Elems`.)
+    /// Otherwise any child nodes are subjected to the same scrutiny.
     ///
     /// Note: this function gets called during evaluation, and in turn calls back into the evaluator,
     /// so it can throw RuntimeError, in keeping with the way those errors are currently handled.
@@ -230,6 +232,8 @@ public enum Kernel {
                                  constants: [NodeType: Eval.Value<Node.Value>],
                                  eval: Eval.EvalInContext<Node.Value>)
                                         throws -> Eval.Value<Node.Value> {
+
+        let nextId = IdGen.Shared.generateId
 
         func expandNode(_ node: Node, level: Int) throws -> Eval.Value<Node.Value> {
             if node.type == Unquote.type, let expr = try unrollUnquoteExpr(node, levels: level) {
@@ -258,7 +262,8 @@ public enum Kernel {
                         case .Node(let child): return try expandChild(child, level: innerLevel)
                         }
                     }
-                    return .Val(.Node(Node(node.id, node.type, .Attrs(expandedAttrs))))
+                    // TODO: what if some descendant ref node refers to it?
+                    return .Val(.Node(Node(nextId(), node.type, .Attrs(expandedAttrs))))
 
                 case .Elems(let elems):
                     let expandedElems = try elems.flatMap { child throws -> [Node] in
@@ -274,11 +279,12 @@ public enum Kernel {
                             }
                         }
                     }
-                    return .Val(.Node(Node(node.id, node.type, .Elems(expandedElems))))
+                    // TODO: what if some descendant ref node refers to it?
+                    return .Val(.Node(Node(nextId(), node.type, .Elems(expandedElems))))
 
                 case .Ref(_):
                     // TODO: verify that the ref points to a node within the quotation?
-                    // TODO: re-label nodes to avoid collisions
+                    // TODO: fix references to re-labeled ancestors
                     return .Val(.Node(node))
 
                 case .Empty:

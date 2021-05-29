@@ -239,8 +239,6 @@ final class KernelTests: XCTestCase {
 
         let result = try Kernel.eval(pgm, constants: builtin)
 
-        print(result.debugDescription)
-
         XCTAssertEqual(Diff.changes(from: expected, to: result), [])
     }
 
@@ -365,6 +363,94 @@ final class KernelTests: XCTestCase {
         XCTAssertEqual(Diff.changes(from: expected2, to: result2), [])
     }
 
+    /// If the same quoted nodes are expanded in more than one place, you get a tree with the same node id appearing in more
+    /// than one place. It's not necessarily broken if any such sub-tree is *just* quoted verbatim; effectively, you have a DAG.
+    func testQuoteTwice() throws {
+        let fooType = NodeType("test", "foo")
+        let barType = NodeType("test", "bar")
+
+        let pgm = gen.Let(expr: gen.Quote(body: gen.Constant(fooType))) { ref in
+            gen.Quote(body: Node(IdGen.Shared.generateId(),
+                                 barType,
+                                 .Attrs([
+                                    AttrName(barType, "foo1"): .Node(
+                                        gen.Unquote(expr: ref())),
+                                    AttrName(barType, "foo2"): .Node(
+                                        gen.Unquote(expr: ref())),
+                                 ])))
+        }
+
+        let result = try Kernel.eval(pgm, constants: [:])
+
+        XCTAssertEqual(result.type, barType)
+        XCTAssertEqual(Node.Util.children(of: result).map(\.type), [fooType, fooType])
+
+        XCTAssertEqual(Set(Node.Util.children(of: result).map(\.id)).count, 1)
+    }
+
+    /// If the same quoted node containing an unquote is expanded more than once, you can get sub-trees that originate from that
+    /// one node, but contain different descendant nodes. In that case, each parent gets assigned a new id.
+    func testQuoteTwiceExpanded() throws {
+        let fooType = NodeType("test", "foo")
+        let xAttr = AttrName(fooType, "x")
+        let barType = NodeType("test", "bar")
+        let foo1Attr = AttrName(barType, "foo1")
+        let foo2Attr = AttrName(barType, "foo2")
+
+        let fn = gen.Lambda(arity: 1) { _, args in
+            let x = args[0]
+
+            return gen.Quote(body: Node(IdGen.Shared.generateId(),
+                                        fooType,
+                                        .Attrs([
+                                            xAttr: .Node(
+                                            gen.Unquote(expr: x())),
+                                        ])))
+        }
+        let pgm = gen.Let(expr: fn) { ref in
+            gen.Quote(body: Node(IdGen.Shared.generateId(),
+                                 barType,
+                                 .Attrs([
+                                    foo1Attr: .Node(
+                                        gen.Unquote(expr: gen.App(fn: ref(),
+                                                                  args: [gen.Int(1)]))),
+                                    foo2Attr: .Node(
+                                        gen.Unquote(expr: gen.App(fn: ref(),
+                                                                  args: [gen.Int(2)]))),
+                                 ])))
+        }
+
+        let expected = Node(IdGen.Shared.generateId(),
+                            barType,
+                            .Attrs([
+                                foo1Attr: .Node(
+                                    Node(IdGen.Shared.generateId(),
+                                         fooType, .Attrs([xAttr: .Prim(.Int(1))]))),
+                                foo2Attr: .Node(
+                                    Node(IdGen.Shared.generateId(),
+                                         fooType, .Attrs([xAttr: .Prim(.Int(2))]))),
+                            ]))
+
+        let result = try Kernel.eval(pgm, constants: [:])
+
+        XCTAssertEqual(Diff.changes(from: expected, to: result), [])
+
+        XCTAssertEqual(Node.Util.children(of: result).map(\.type), [fooType, fooType])
+        XCTAssertEqual(Set(Node.Util.children(of: result).map(\.id)).count, 2)
+    }
+
+    /// Evaluate a quoted node which contains both a node and a ref that refers to it.
+    func testQuoteInnerRef() throws {
+        throw XCTSkip("TODO")
+    }
+
+    /// Evaluate a quoted node which contains a ref node whose target is somehow located *outside* the quotation. Is it just an error,
+    /// or is there some way that can be valid?
+    func testQuoteOuterRef() throws {
+        throw XCTSkip("TODO")
+    }
+
+
     func testMatchTrivial() throws {
         let pgm = gen.Match(expr: gen.Int(42),
                             pattern: gen.Int(42),
@@ -439,10 +525,16 @@ final class KernelTests: XCTestCase {
         ("testQuoteTrivial", testQuoteTrivial),
         ("testQuoteSingleUnquote", testQuoteSingleUnquote),
         ("testQuoteAttrPrimitives", testQuoteAttrPrimitives),
+        ("testUnquoteSplice", testUnquoteSplice),
+        ("testQuotedQuote", testQuotedQuote),
+        ("testQuotedQuoteWithUnquotedUnquote", testQuotedQuoteWithUnquotedUnquote),
+        ("testQuoteTwice", testQuoteTwice),
+        ("testQuoteTwiceExpanded", testQuoteTwiceExpanded),
+        ("testQuoteInnerRef", testQuoteInnerRef),
+        ("testQuoteOuterRef", testQuoteOuterRef),
         ("testMatchTrivial", testMatchTrivial),
         ("testMatchTrivialNoMatch", testMatchTrivialNoMatch),
         ("testMatchBindAttr", testMatchBindAttr),
-
     ]
 
 
