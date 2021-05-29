@@ -75,7 +75,7 @@ public struct AttrName: Hashable {
 
 /// Every node has an `id`,  `type`, and some kind of content, which may be a collection of attributes,
 /// a sequence of nodes, a reference to another node, or nothing at all.
-public struct Node: CustomDebugStringConvertible {
+public struct Node {
     public var id: NodeId
     public var type: NodeType
     public var content: Content
@@ -171,45 +171,6 @@ public struct Node: CustomDebugStringConvertible {
             }
             return loop(root)
         }
-    }
-
-    /// A reasonably human-readable, fairly compressed, nicely indented, mostly unambiguous, string representation.
-    public var debugDescription: String {
-        func writeNode(_ node: Node) -> [String] {
-            func writeContent(_ content: Node.Content) -> [String] {
-                switch content {
-                case .Attrs(let attrs):
-                    return attrs.map { attr, v -> [String] in
-                        let name = attr.name.remove(prefix: node.type.fullName + "/")
-                        switch v {
-                        case .Prim(.Nil):
-                            return ["- \(name): nil"]
-                        case .Prim(.Bool(let x)):
-                            return ["- \(name): \(x)"]
-                        case .Prim(.Int(let x)):
-                            return ["- \(name): \(x)"]
-                        case .Prim(.String(let x)):
-                            return ["- \(name): \(x.debugDescription)"]
-                        case .Node(let child):
-                            return ["- \(name):"]
-                                + writeNode(child).map { "    " + $0 }
-                        }
-                    }.flatMap { $0 }
-
-                case .Elems(let elems):
-                    return elems.flatMap(writeNode)
-
-                case .Ref(let target):
-                    return ["ref: \(target.id)"]
-
-                case .Empty:
-                    return []
-                }
-            }
-            return ["\(node.type.fullName) [\(node.id.id)]"] +
-                writeContent(node.content).map { "  " + $0 }
-        }
-        return writeNode(self).joined(separator: "\n")
     }
 }
 
