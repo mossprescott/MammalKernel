@@ -75,8 +75,8 @@ public enum Kernel {
             }
 
         case Let.type:
-            let bindResult: Either<Eval.Expr<Node.Value>, NodeId> =
-                required(node, Let.bind, expected: "Bind") { val in
+            return
+                required(node, Let.bind, expected: "Bind") { val -> NodeId? in
                     switch val {
                     case .Node(let bindNode) where bindNode.type == Bind.type:
                         return bindNode.id
@@ -84,52 +84,48 @@ public enum Kernel {
                         return nil
                     }
                 }
-            switch bindResult {
-            case .right(let bindId):
-                let expr = requiredExpr(node, Let.expr, handle: translateChild)
-                let body = requiredExpr(node, Let.body, handle: translateChild)
-                return .Let(Eval.Name(id: bindId.id), expr: expr, body: body)
-            case .left(let failExpr):
-                return failExpr
-            }
+                .mapRight { bindId in
+                    let expr = requiredExpr(node, Let.expr, handle: translateChild)
+                    let body = requiredExpr(node, Let.body, handle: translateChild)
+                    return .Let(Eval.Name(id: bindId.id), expr: expr, body: body)
+                }
+                .merge()
 
         case Lambda.type:
-            let params = required(node, Kernel.Lambda.params, expected: "<Binds>") { val -> [Node]? in
-                if case .Node(let paramsNode) = val,
-                   case .Elems(let paramsChildren) = paramsNode.content {
-                    return paramsChildren
+            return
+                required(node, Kernel.Lambda.params, expected: "<Binds>") { val -> [Node]? in
+                    if case .Node(let paramsNode) = val,
+                       case .Elems(let paramsChildren) = paramsNode.content {
+                        return paramsChildren
+                    }
+                    else {
+                        return nil
+                    }
                 }
-                else {
-                    return nil
+                .mapRight { paramNodes in
+                    let body = requiredExpr(node, Kernel.Lambda.body, handle: translateChild)
+                    return .Lambda(Eval.Name(id: node.id.id),
+                                   params: paramNodes.map { n in Eval.Name(id: n.id.id) },
+                                   body: body)
                 }
-            }
-            switch params {
-            case .left(let err):
-                return err
-            case .right(let paramNodes):
-                let body = requiredExpr(node, Kernel.Lambda.body, handle: translateChild)
-                return .Lambda(Eval.Name(id: node.id.id),
-                               params: paramNodes.map { n in Eval.Name(id: n.id.id) },
-                               body: body)
-            }
+                .merge()
 
         case App.type:
             let fn = requiredExpr(node, Kernel.App.fn, handle: translateChild)
-            let args = required(node, Kernel.App.args, expected: "<Exprs>") { val -> [Node]? in
-                if case .Node(let argsNode) = val,
-                   case .Elems(let argsChildren) = argsNode.content {
-                    return argsChildren
+            return
+                required(node, Kernel.App.args, expected: "<Exprs>") { val -> [Node]? in
+                    if case .Node(let argsNode) = val,
+                       case .Elems(let argsChildren) = argsNode.content {
+                        return argsChildren
+                    }
+                    else {
+                        return nil
+                    }
                 }
-                else {
-                    return nil
+                .mapRight { argNodes in
+                    .App(fn: fn, args: argNodes.map { translate($0, constants: constants) })
                 }
-            }
-            switch args {
-            case .left(let err):
-                return err
-            case .right(let argNodes):
-                return .App(fn: fn, args: argNodes.map { translate($0, constants: constants) })
-            }
+                .merge()
 
         case Quote.type:
             return requiredExpr(node, Quote.body) { node in
@@ -149,31 +145,30 @@ public enum Kernel {
             // TODO: what if an unquoted expression is embedded? There seems to be no
             // compelling reason not to evaluate it and then match against it. Well, except that
             // it could get complicated.
-            switch required(node, Match.pattern, expected: "<pattern>", handle: { val -> Node? in
-                switch val {
-                case .Node(let node): return node
-                default: return nil
+            return
+                required(node, Match.pattern, expected: "<pattern>") { val -> Node? in
+                    switch val {
+                    case .Node(let node): return node
+                    default: return nil
+                    }
                 }
-            }) {
-            case .left(let err):
-                return err
-
-            case .right(let pattern):
-                let bindings = findBindings(inPattern: pattern)
-
-                return .Match(expr: expr,
-                              bindings: bindings.map { Eval.Name(id: $0.id) },
-                              body: body,
-                              otherwise: otherwise) { rv in
-                                switch rv {
-                                case .Val(let val):
-                                    return matchAndBind(pattern: pattern,
-                                                        withValue: val)
-                                default:
-                                    return .NoMatch
-                                }
-                              }
-            }
+                .mapRight { pattern in
+                    let bindings = findBindings(inPattern: pattern)
+                    
+                    return .Match(expr: expr,
+                                  bindings: bindings.map { Eval.Name(id: $0.id) },
+                                  body: body,
+                                  otherwise: otherwise) { rv in
+                        switch rv {
+                        case .Val(let val):
+                            return matchAndBind(pattern: pattern,
+                                                withValue: val)
+                        default:
+                            return .NoMatch
+                        }
+                    }
+                }
+                .merge()
 
         default:
             if let val = constants[node.type] {

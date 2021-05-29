@@ -37,6 +37,15 @@ public enum Either<Left, Right> {
             return .right(val)
         }
     }
+
+    func mapRight<R>(transform: (Right) throws -> R) rethrows -> Either<Left, R> {
+        switch self {
+        case .left(let val):
+            return .left(val)
+        case .right(let val):
+            return .right(try transform(val))
+        }
+    }
 }
 
 /// Extract an attribute and attempt to translate it to some value, returning either the result or a String describing what went wrong.
