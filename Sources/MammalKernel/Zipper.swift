@@ -98,6 +98,8 @@ public struct Zipper {
                     return nil
                 }
             }
+            .sorted(by: { attrOrder(type, $1.0, $0.0) })
+
             if let (previousName, previousNode) = earlierPairs.first {
                 var newOther = other
                 newOther.removeValue(forKey: name)
@@ -138,6 +140,8 @@ public struct Zipper {
                     return nil
                 }
             }
+            .sorted(by: { attrOrder(type, $0.0, $1.0) })
+
             if let (nextName, nextNode) = laterPairs.first {
                 var newOther = other
                 newOther.removeValue(forKey: name)
