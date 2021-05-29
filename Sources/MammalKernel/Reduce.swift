@@ -314,15 +314,11 @@ public enum Reduce {
         return Eval.Value.Fn(arity: 1) { args in
             switch args[0] {
             case .Val(.Node(let node)):
-                switch node.content {
-                case .Ref(let target):
-                    if let targetNode = nodesById[target] {
-                        return .Val(.Node(targetNode))
-                    }
-                    else {
-                        return .Val(.Prim(.Nil))
-                    }
-                default:
+                if case .Ref(let target) = node.content,
+                   let targetNode = nodesById[target] {
+                    return .Val(.Node(targetNode))
+                }
+                else {
                     return .Val(.Prim(.Nil))
                 }
             default:

@@ -95,15 +95,11 @@ public enum Kernel {
 
         case Lambda.type:
             let params = required(node, Kernel.Lambda.params, expected: "<Binds>") { val -> [Node]? in
-                switch val {
-                case .Node(let paramsNode):
-                    switch paramsNode.content {
-                    case .Elems(let paramsChildren):
-                        return paramsChildren
-                    default:
-                        return nil
-                    }
-                default:
+                if case .Node(let paramsNode) = val,
+                   case .Elems(let paramsChildren) = paramsNode.content {
+                    return paramsChildren
+                }
+                else {
                     return nil
                 }
             }
@@ -120,17 +116,13 @@ public enum Kernel {
         case App.type:
             let fn = requiredExpr(node, Kernel.App.fn, handle: translateChild)
             let args = required(node, Kernel.App.args, expected: "<Exprs>") { val -> [Node]? in
-                switch val {
-                case .Node(let argsNode):
-                    switch argsNode.content {
-                    case .Elems(let argsChildren):
-                        return argsChildren
-                    default: return nil
-                    }
-                default:
+                if case .Node(let argsNode) = val,
+                   case .Elems(let argsChildren) = argsNode.content {
+                    return argsChildren
+                }
+                else {
                     return nil
                 }
-
             }
             switch args {
             case .left(let err):
@@ -311,16 +303,11 @@ public enum Kernel {
                 let expanded = try eval(requiredExpr(child, UnquoteSplice.expr) { expr in
                     translate(expr, constants: constants)
                 })
-                switch expanded {
-                case .Val(.Node(let node)):
-                    switch node.content {
-                    case .Elems(let elems):
-                        return elems.map { .Node($0) }
-                    default:
-                        throw Eval.RuntimeError.TypeError(expected: "sequence node",
-                                                          found: .Val(expanded))
-                    }
-                default:
+                if case .Val(.Node(let node)) = expanded,
+                   case .Elems(let elems) = node.content {
+                    return elems.map { .Node($0) }
+                }
+                else {
                     throw Eval.RuntimeError.TypeError(expected: "sequence node",
                                                       found: .Val(expanded))
                 }
@@ -336,11 +323,11 @@ public enum Kernel {
         // first, but it doesn't have a node for `expr`, then throw.
         func unrollUnquoteExpr(_ node: Node, levels: Int) throws -> Node? {
             let result: Either<Eval.Expr<Node.Value>, Node> = required(node, Unquote.expr, expected: "<node>") { expr in
-                switch expr {
-                case .Prim(_):
-                    return nil
-                case .Node(let exprNode):
+                if case .Node(let exprNode) = expr {
                     return exprNode
+                }
+                else {
+                    return nil
                 }
             }
             switch result {
