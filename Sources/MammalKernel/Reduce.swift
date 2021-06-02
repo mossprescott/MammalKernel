@@ -132,7 +132,6 @@ public enum Reduce {
             let allSourceIds = Set(Node.Util.descendantsById(of: root).keys)
             var reducedRootToSourceId: [NodeId: NodeId] = [:]
             func record(_ from: Node, reducedTo to: Node) {
-                print("reduced: \(from.id.id) -> \(to.id.id)")
                 if let previousResult = reducedRootToSourceId[from.id] {
                     reducedRootToSourceId.removeValue(forKey: from.id)
                     reducedRootToSourceId[to.id] = previousResult
