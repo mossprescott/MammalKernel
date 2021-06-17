@@ -95,6 +95,15 @@ public enum Reduce {
         var rootNode: Node
     }
 
+    /// No-op reduction; just constructs a valid response with no nodes affected.
+    public struct None {
+        public init() {}
+        
+        public func reduce(_ root: Node) -> (Node, SourceMap) {
+            return (root, SourceMap(reducedIdToSourceId: [:]))
+        }
+    }
+
 // MARK: -TopDown
 
     /// Apply a reduce function to the nodes of a tree in single-pass, top-down fashion.
