@@ -11,7 +11,7 @@
 
 /// Identifies a node. Unique with respect to all the other Nodes appearing in the same program/document/tree.
 public struct NodeId: Hashable {
-    var id: Int
+    public var id: Int
 
     public init(_ id: Int) {
         self.id = id
@@ -25,20 +25,20 @@ public struct NodeId: Hashable {
 /// separated by a slash.
 /// For example, an integer literal in the kernel language has the type `"kernel/int"`.
 public struct NodeType: Hashable {
-    var language: String
-    var name: String
+    /// For example: `kernel`.
+    public var language: String
 
+    /// For example: `int`.
+    public var simpleName: String
+
+    /// For example: `kernel/int`.
     public var fullName: String {
-        language + "/" + name
-    }
-
-    public var simpleName: String {
-        name
+        language + "/" + simpleName
     }
 
     public init(_ language: String, _ name: String) {
         self.language = language
-        self.name = name
+        self.simpleName = name
     }
 }
 
