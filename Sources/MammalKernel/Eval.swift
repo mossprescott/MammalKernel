@@ -40,7 +40,7 @@
    before starting evaluation, wouldn't that be cool?
  */
 
-/// Namespace for types and functions for evaluation.
+/// Namespace for types and functions for evaluation, working with any type of primitive values.
 public enum Eval {
 
 // MARK: - AST
@@ -56,7 +56,8 @@ public enum Eval {
         }
     }
 
-    /// AST for the Mammel kernel language, consisting of expressions which can be evaluated to produce values of some type `T`.
+    /// AST for the (abstract) Mammel kernel language, consisting of *expressions* which can be *evaluated* to produce values of
+    /// some type `T`.
     public indirect enum Expr<T> {
         /// Evaluates to a fixed value.
         case Literal(_: T)
@@ -120,8 +121,12 @@ public enum Eval {
 
 // MARK: - Runtime values
 
-    /// A "run-time" value can be either a simple value or an unevaluated function, which may have been defined
-    /// as an `Expr.Lambda` or may be a "foreign" function provided by the platform.
+    /// A "run-time" value, which may be a simple value (of whatever kind of values can appear in programs), or something that exists
+    /// only in memory and can't be represented directly as a program.
+    ///
+    /// Run-time-only values include:
+    /// - unevaluated functions, which result from evaluating`Expr.Lambda` or may be "foreign" functions provided by the platform.
+    /// - errors that occur during evaluation, which come with extra information to aid debugging
     public indirect enum Value<T> {
         case Val(T)
 
