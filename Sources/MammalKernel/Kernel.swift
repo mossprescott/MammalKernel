@@ -8,13 +8,21 @@
 /// Note: `Kernel` has no constructors; it's just a namespace for these declarations.
 public enum Kernel {
 
+    /// The type of expressions after decoding from the raw Node representation. This is just `Eval.Expr`, specialized to the value
+    /// type for kernel programs (nodes and primitives.)
+    public typealias Expr = Eval.Expr<Node.Value>
+
+    /// The type of values that can appear as attributes in program nodes. This is just `Eval.Value`, specialized to the value
+    /// type for kernel programs (nodes and primitives.)
+    public typealias Value = Eval.Value<Node.Value>
+
     /// Evaluate/execute a program by translating it to the `Eval` AST, evaluating it, and
     /// then translating the resulting value back into a source-level representation.
     ///
     /// - Parameter constants: A mapping giving additional node types, each of which is to be translated to
     /// the provided literal value. This provides a mechanism to resolve references to values provided by the platform,
     /// for example built-in functions.
-    public static func eval(_ program: Node, constants: [NodeType: Eval.Value<Node.Value>]) throws -> Node {
+    public static func eval(_ program: Node, constants: [NodeType: Value]) throws -> Node {
         let ast = translate(program, constants: constants)
 
         let result = try Eval.eval(ast, env: .Empty)
@@ -34,7 +42,7 @@ public enum Kernel {
     ///
     /// If there are any structural errors, the resulting expression will fail (that is, produce an `Error` value
     /// when it's evaluated; if that portion of the program is never evaluated, no harm done.
-    static func translate(_ node: Node, constants: [NodeType: Eval.Value<Node.Value>]) -> Eval.Expr<Node.Value> {
+    static func translate(_ node: Node, constants: [NodeType: Value]) -> Expr {
         let translateChild = { translate($0, constants: constants) }
 
         switch node.type {
@@ -170,6 +178,21 @@ public enum Kernel {
                 }
                 .merge()
 
+//        case Fail.type:
+//            // TODO: translate back to Fail
+//            return .Fail(message: "Cannot evaluate serialized Fn")
+
+        case Fn.type:
+            return .Fail(message: "Cannot evaluate serialized Fn")
+
+        case Error.type:
+            return required(node, Error.description, expected: "description") { val in
+                switch val {
+                case .Prim(.String(let msg)): return .Fail(message: msg)
+                default: return nil
+                }
+            }.merge()
+
         default:
             if let val = constants[node.type] {
                 return .RuntimeLiteral(val)
@@ -184,7 +207,7 @@ public enum Kernel {
     private static func required<T>(
         _ node: Node, _ attr: AttrName,
         expected: String, handle: (Node.Value) -> T?
-    ) -> Either<Eval.Expr<Node.Value>, T> {
+    ) -> Either<Expr, T> {
         requiredAttr(node, attr, expected: expected, handle: handle)
             .mapLeft { .Fail(message: $0) }
     }
@@ -192,9 +215,9 @@ public enum Kernel {
     /// Extract an attribute which is to be translated directly to an `Expr`. If anything doesn't match, `Fail`.
     private static func requiredExpr(
         _ node: Node, _ attr: AttrName,
-        handle: (Node) -> Eval.Expr<Node.Value>?
-    )  -> Eval.Expr<Node.Value> {
-        required(node, attr, expected: "<Expr>") { val -> Eval.Expr<Node.Value>? in
+        handle: (Node) -> Expr?
+    )  -> Expr {
+        required(node, attr, expected: "<Expr>") { val -> Expr? in
             switch val {
             case .Prim(_):
                 return nil
@@ -210,19 +233,19 @@ public enum Kernel {
     /// Expand a node which appeared inside a `Quote` node's body, in a particular environment during evaluation.
     /// The structure of the node is inspected: if it is an `Unquote`, its `expr` is evaluated and substituted. If it's an
     /// `UnquoteSplice`, its expr is evaluated, and the chlidren of the resulting node (which must be `Elems`) are spliced into
-    /// the current position (which must also be withint `Elems`.)
+    /// the current position (which must also be within `Elems`.)
     /// Otherwise any child nodes are subjected to the same scrutiny.
     ///
     /// Note: this function gets called during evaluation, and in turn calls back into the evaluator,
     /// so it can throw RuntimeError, in keeping with the way those errors are currently handled.
     static func expandQuotedNode(_ root: Node,
-                                 constants: [NodeType: Eval.Value<Node.Value>],
+                                 constants: [NodeType: Value],
                                  eval: Eval.EvalInContext<Node.Value>)
-                                        throws -> Eval.Value<Node.Value> {
+                                        throws -> Value {
 
         let nextId = IdGen.Shared.generateId
 
-        func expandNode(_ node: Node, level: Int) throws -> Eval.Value<Node.Value> {
+        func expandNode(_ node: Node, level: Int) throws -> Value {
             if node.type == Unquote.type, let expr = try unrollUnquoteExpr(node, levels: level) {
                 return try eval(translate(expr, constants: constants))
             }
@@ -317,7 +340,7 @@ public enum Kernel {
         // levels, if any. If any other node is encountered first, then nil. If an unquote is found
         // first, but it doesn't have a node for `expr`, then throw.
         func unrollUnquoteExpr(_ node: Node, levels: Int) throws -> Node? {
-            let result: Either<Eval.Expr<Node.Value>, Node> = required(node, Unquote.expr, expected: "<node>") { expr in
+            let result: Either<Expr, Node> = required(node, Unquote.expr, expected: "<node>") { expr in
                 if case .Node(let exprNode) = expr {
                     return exprNode
                 }
@@ -477,7 +500,7 @@ public enum Kernel {
     /// an expression that evaluates to the same value.
     /// Ordinary values are simply returned, but unevaluated functions and errors both get converted
     /// back to "expressions" that aren't very useful when evaluated.
-    static func repr(_ value: Eval.Value<Node.Value>) -> Node {
+    static func repr(_ value: Value) -> Node {
         let nextId = IdGen.Shared.generateId
 
         switch value {
