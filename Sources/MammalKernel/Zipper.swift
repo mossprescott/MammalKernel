@@ -7,7 +7,9 @@ import Foundation
 /// that the mixed type of `Node` makes this all a bit more complicated than the classic functional zipper:
 ///
 /// - An attribute may contain a node or a primitive value; only nodes participate in the tree of potential locations.
-/// - For navigation purposes, it's useful to always have a notion of next-previous sibling, so the caller supplies
+/// - For navigation purposes, it's useful to always have a notion of next-previous sibling, so the caller supplies an ordering that
+///     is applied to the *node*-containing attributes of any Attr node to define how they form a sequence. Note: it's not possible to
+///     navigate to a primitive-valued attribute, so any such attribute doesn't participate in the ordering.
 public struct Zipper {
     public var node: Node
 
@@ -291,14 +293,93 @@ public struct Zipper {
         fatalError("TODO")
     }
 
+    /// Move the *previous* sibling, if any, so that it becomes *next*, and the focused node moves "left" by one.
+    /// For example, suppose A, B and C are siblings and B is the current location:
+    ///
+    ///     A, (B), C
+    ///
+    /// Then after this operation, the sequence is:
+    ///
+    ///     (B), A, C
+    ///
+    /// Note: this is *not* provided as a mutating func, because it can fail and that just gets awkward.
+    public func swapWithPrevious() -> Zipper? {
+        switch path {
+        case .top:
+            return nil
+
+        case .attr(_, _, _, _, _):
+            // Note: moving the children of an attr around is often non-sensical, but probably
+            // should be supported for completeness/didactic purposes.
+            print("TODO: re-order Attr children")
+            return nil
+
+        case .elem(let id, let type, let left, let parentPath, let right):
+            if let previousNode = left.first {
+                return Zipper(node,
+                              .elem(id, type, Array(left[1...]), parentPath, [previousNode] + right),
+                              attrOrder: attrOrder)
+            }
+            else {
+                return nil
+            }
+        }
+    }
+
+    /// Move the *next* sibling, if any, so that it becomes *previous*, and the focused node moves "right" by one.
+    /// For example, suppose A, B and C are siblings and B is the current location:
+    ///
+    ///     A, (B), C
+    ///
+    /// Then after this operation, the sequence is:
+    ///
+    ///     A, C, (B)
+    ///
+    /// Note: this is *not* provided as a mutating func, because it can fail and that just gets awkward.
+    public func swapWithNext() -> Zipper? {
+        switch path {
+        case .top:
+            return nil
+
+        case .attr(_, _, _, _, _):
+            // Note: moving the children of an attr around is often non-sensical, but probably
+            // should be supported for completeness/didactic purposes.
+            print("TODO: re-order Attr children")
+            return nil
+
+        case .elem(let id, let type, let left, let parentPath, let right):
+            if let nextNode = right.first {
+                return Zipper(node,
+                              .elem(id, type, [nextNode] + left, parentPath, Array(right[1...])),
+                              attrOrder: attrOrder)
+            }
+            else {
+                return nil
+            }
+        }
+    }
+
     /// Insert a new sibling before the current location, and move the focus to the new node. Works only on .Elems locations.
-    public mutating func insertBefore(_ newNode: Node) {
-        fatalError("TODO")
+    public func insertBefore(_ newNode: Node) -> Zipper? {
+        print("TODO: insertBefore")
+        return nil
     }
 
     /// Insert a new sibling after the current location, and move the focus to the new node. Works only on .Elems locations.
-    public mutating func insertAfter(_ newNode: Node) {
-        fatalError("TODO")
+    /// The node is inserted verbatim; no renaming of nodes is done.
+    public func insertAfter(_ newNode: Node) -> Zipper? {
+        switch path {
+        case .top:
+            return nil
+
+        case .attr(_, _, _, _, _):
+            return nil
+
+        case .elem(let id, let type, let left, let parentPath, let right):
+            return Zipper(newNode,
+                          .elem(id, type, [node] + left, parentPath, right),
+                          attrOrder: attrOrder)
+        }
     }
 
     /// TODO: where to leave the location? previous sibling; next sibling; parent?
