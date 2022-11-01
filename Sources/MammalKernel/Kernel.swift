@@ -635,12 +635,12 @@ public enum Kernel {
         public static let otherwise = AttrName(type, "otherwise")
    }
 
-    /// TODO: does this need to be syntax? could be a function that you call, but that would require
-    /// special translation.
-    public enum Fail {
-        public static let type = NodeType("kernel", "fail")
-        public static let message = AttrName(type, "message")
-    }
+//    /// TODO: does this need to be syntax? could be a function that you call, but that would require
+//    /// special translation.
+//    public enum Fail {
+//        public static let type = NodeType("kernel", "fail")
+//        public static let message = AttrName(type, "message")
+//    }
 
     public enum Fn {
         public static let type = NodeType("kernel", "fn")
