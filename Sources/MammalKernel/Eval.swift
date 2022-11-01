@@ -190,6 +190,8 @@ public enum Eval {
         /// An error produced intentionally by user code (via `Expr.Fail`).
         /// Need a better name.
         case UserError(message: String)
+
+        case OtherError(message: String)
     }
 
 // MARK: - Environment/Scope
