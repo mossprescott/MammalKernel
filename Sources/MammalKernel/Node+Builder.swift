@@ -56,24 +56,29 @@ public struct Attrs: NodeBuilder {
 
 @resultBuilder public struct AttrsBuilder {
     /// Wrap `nil` as the value of an attribute. Ok, this type is perverse, but it permits only `nil`, which makes it explicit.
-    public static func buildExpression(_ node: (AttrName, Never?)) -> Builder<[AttrName: Node.Value]> {
-        { _ in [node.0: .Prim(.Nil)] }
+    public static func buildExpression(_ pair: (AttrName, Never?)) -> Builder<[AttrName: Node.Value]> {
+        { _ in [pair.0: .Prim(.Nil)] }
     }
 
-    public static func buildExpression(_ node: (AttrName, Bool)) -> Builder<[AttrName: Node.Value]> {
-        { _ in [node.0: .Prim(.Bool(node.1))] }
+    public static func buildExpression(_ pair: (AttrName, Bool)) -> Builder<[AttrName: Node.Value]> {
+        { _ in [pair.0: .Prim(.Bool(pair.1))] }
     }
 
-    public static func buildExpression(_ node: (AttrName, Int)) -> Builder<[AttrName: Node.Value]> {
-        { _ in [node.0: .Prim(.Int(node.1))] }
+    public static func buildExpression(_ pair: (AttrName, Int)) -> Builder<[AttrName: Node.Value]> {
+        { _ in [pair.0: .Prim(.Int(pair.1))] }
     }
 
-    public static func buildExpression(_ node: (AttrName, String)) -> Builder<[AttrName: Node.Value]> {
-        { _ in [node.0: .Prim(.String(node.1))] }
+    public static func buildExpression(_ pair: (AttrName, String)) -> Builder<[AttrName: Node.Value]> {
+        { _ in [pair.0: .Prim(.String(pair.1))] }
     }
 
-    public static func buildExpression(_ node: (AttrName, NodeBuilder)) -> Builder<[AttrName: Node.Value]> {
-        { idGen in [node.0: .Node(node.1.build(idGen))] }
+    public static func buildExpression(_ pair: (AttrName, NodeBuilder)) -> Builder<[AttrName: Node.Value]> {
+        { idGen in [pair.0: .Node(pair.1.build(idGen))] }
+    }
+
+    /// For the case that the type of value isn't known until runtime.
+    public static func buildExpression(_ pair: (AttrName, Node.Value)) -> Builder<[AttrName: Node.Value]> {
+        { _ in [pair.0: pair.1] }
     }
 
     public static func buildBlock(_ elems: Builder<[AttrName: Node.Value]>...) -> Builder<[AttrName: Node.Value]> {
