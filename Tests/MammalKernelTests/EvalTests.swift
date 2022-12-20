@@ -3,6 +3,9 @@ import MammalKernel
 
 final class EvalTests: XCTestCase {
 
+    typealias Expr = Eval.Expr<Int>
+    typealias Value = Eval.Value<Int>
+
 // MARK: - Basic features
 
     func testLiteral() throws {
@@ -183,9 +186,118 @@ final class EvalTests: XCTestCase {
         XCTAssertTrue(factFive.isVal(120))
     }
 
-// TODO: tail calls don't use stack
+    /// A function can call itself a million times, if the calls are in tail position.
+    func testTailRecursion() throws {
+        let plus = Eval.Name(id: 0)
+        let plusFn = liftBinary(f: (+))
+        let builtInEnv = Eval.Environment<Int>.Empty
+            .with(plus, boundTo: plusFn)
+
+        // Tail-recursive version:
+        //   f 0 acc = acc
+        //   f n acc = f (n - 1) (acc + n)
+        let fnRec = Eval.Name(id: 1)
+        let n = Eval.Name(id: 2)
+        let acc = Eval.Name(id: 3)
+        let fn = Expr.Lambda(fnRec,
+                             params: [n, acc],
+                             body: Expr.Match(expr: .Var(n),
+                                              bindings: [],
+                                              body: .Var(acc),
+                                              otherwise: .App(fn: Eval.Expr.Var(fnRec),
+                                                              args: [
+                                                                .App(fn: .Var(plus),
+                                                                     args: [.Var(n), .Literal(-1)]),
+                                                                .App(fn: .Var(plus),
+                                                                     args: [.Var(acc), .Var(n)]),
+                                                              ]),
+                                              match: lift { $0 <= 0 }))
+
+
+
+        let result1 = try Eval.eval(Eval.Expr<Int>.App(fn: fn, args: [.Literal(6), .Literal(0)]),
+                                   env: builtInEnv)
+        try result1.withVal { XCTAssertEqual($0, 21) }
+
+        let n2 = 1000*1000
+        let result2 = try Eval.eval(Eval.Expr<Int>.App(fn: fn, args: [.Literal(n2), .Literal(0)]),
+                                   env: builtInEnv)
+        try result2.withVal { XCTAssertEqual($0, n2*(n2+1)/2) }
+    }
+
+    func testMutualRecursion() {
+        // TODO: a pair of functions that call each other a million times
+        XCTFail("TODO")
+    }
+
 
 // MARK: - Error cases
+
+// In each case, the error is captured as an Expr.Val.Error
+
+    func testStackOverflow() throws {
+        let plus = Eval.Name(id: 0)
+        let plusFn = liftBinary(f: (+))
+        let builtInEnv = Eval.Environment<Int>.Empty
+            .with(plus, boundTo: plusFn)
+
+        // This function calls itself, but not in tail position, so it builds up partial results
+        // on the stack:
+        //   f 0 = 0
+        //   f n = n + f (n - 1)
+        let fnRec = Eval.Name(id: 1)
+        let n = Eval.Name(id: 2)
+        let fn = Expr.Lambda(fnRec,
+                             params: [n],
+                             body: Expr.Match(expr: .Var(n),
+                                              bindings: [],
+                                              body: .Literal(0),
+                                              otherwise: .App(fn: .Var(plus),
+                                                              args: [
+                                                                .Var(n),
+                                                                .App(fn: Eval.Expr.Var(fnRec),
+                                                                     args: [
+                                                                        .App(fn: .Var(plus),
+                                                                             args: [.Var(n), .Literal(-1)]),
+                                                                     ])
+                                                              ]),
+                                              match: lift { $0 <= 0 }))
+
+
+
+        let result1 = try Eval.eval(Eval.Expr<Int>.App(fn: fn, args: [.Literal(6)]),
+                                   env: builtInEnv)
+        try result1.withVal { XCTAssertEqual($0, 21) }
+
+        let n2 = 1000*1000
+        let result2 = try Eval.eval(Eval.Expr<Int>.App(fn: fn, args: [.Literal(n2)]),
+                                   env: builtInEnv)
+        try result2.withVal { XCTAssertEqual($0, n2*(n2+1)/2) }
+
+    }
+
+    /// This function makes a tail-recursive call, so uses no stack, but also never makes any progress, so it should get killed.
+    func testInfiniteLoop() throws {
+//        let expect = expectation(description: "killed")
+
+        let fnRec = Eval.Name(id: 1)
+        let fn = Eval.Expr<Int>.Lambda(fnRec,
+                                       params: [],
+                                       body: Eval.Expr.App(fn: Eval.Expr.Var(fnRec),
+                                                           args: []))
+        
+        switch try Eval.eval(Eval.Expr<Int>.App(fn: fn, args: []),
+                             env: Eval.Environment<Int>.Empty) {
+        case .Error(.TimeOut):
+            print("Timed out as expected")
+            //expect.fulfill()
+        default:
+            XCTFail("Should have produced an error")
+        }
+//        result.withError { XCTAssertEqual($0, .TimeOut) }
+
+//        waitForExpectations(timeout: 1)
+    }
 
 // TODO: lots of error cases that should throw a descriptive error and not just die or hang
 
