@@ -161,10 +161,19 @@ public enum Eval {
         /// caller to check the arity.
         public func withFn<U>(handle: (Int, ([Value]) throws -> Value) throws -> U) throws -> U {
             switch self {
-            case .Val(_), .Error(_):
-                throw RuntimeError.TypeError(expected: ".Fn", found: self)
             case .Fn(let arity, let fn):
                 return try handle(arity, fn)
+            case .Val(_), .Error(_):
+                throw RuntimeError.TypeError(expected: ".Fn", found: self)
+            }
+        }
+
+        public func withError<U>(handle: (RuntimeError<T>) throws -> U) throws -> U {
+            switch self {
+            case .Error(let re):
+                return try handle(re)
+            case .Val(_), .Fn(_, _):
+                throw RuntimeError.TypeError(expected: ".Error", found: self)
             }
         }
     }
