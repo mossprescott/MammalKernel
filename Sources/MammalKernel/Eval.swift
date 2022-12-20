@@ -196,10 +196,14 @@ public enum Eval {
         /// This is actually a "static" error, probably, depending on the semantics…
         case NotBound(_: Name)
 
+        /// Evaluation went on too long without producing a result, and was killed to avoid hanging the system.
+        case TimeOut
+
         /// An error produced intentionally by user code (via `Expr.Fail`).
         /// Need a better name.
         case UserError(message: String)
 
+        /// For any unanticipated need.
         case OtherError(message: String)
     }
 
@@ -256,66 +260,92 @@ public enum Eval {
     //}
 
     /// TODO: not public, if nobody needs to use it directly (except possibly tests)
-    static public func eval<T>(_ node: Expr<T>, env: Environment<T>) throws -> Value<T> {
-        switch node {
-        case .Literal(let val):
-            return .Val(val)
+    ///
+    /// - Parameters:
+    ///   - budget: maximum "steps" of evaluation that should be performed before giving up and yielding a TimeOut
+    ///
+    /// - Returns: a value if evaluation completes normally
+    /// - Returns: `RuntimeError.TimeOut` if evaluation isn't finished after `budget` steps
+    static public func eval<T>(_ node: Expr<T>, env: Environment<T>, budget: Int = 1000) -> Value<T> {
+        var remainingBudget = budget
 
-        case .RuntimeLiteral(let val):
-            return val
-
-        case .Var(let name):
-            if let val = env.lookup(name) {
-                return val
+        func go(_ node: Expr<T>, env: Environment<T>) throws -> Value<T> {
+            if remainingBudget <= 0 {
+                throw RuntimeError<T>.TimeOut
             }
-            else {
-                throw RuntimeError<T>.NotBound(name)
-            }
+            remainingBudget = remainingBudget - 1
 
-        case .Let(let name, let expr, let body):
-            let value = try eval(expr, env: env)
-            let newEnv = env.with(name, boundTo: value)
-            return try eval(body, env: newEnv)
+                switch node {
+                case .Literal(let val):
+                    return .Val(val)
 
-        case .Lambda(let name, let params, let body):
-            func f(args: [Value<T>]) throws -> Value<T> {
-                var newEnv = try env.with(names: params, boundTo: args)
-                if let n = name {
-                    // Yikes: this is one way to get the lambda's name bound when it's
-                    // evaluated, but it ain't pretty. Is there a more natural way to
-                    // close this loop?
-                    newEnv = newEnv.with(n, boundTo: .Fn(arity: params.count, body: f))
+                case .RuntimeLiteral(let val):
+                    return val
+
+                case .Var(let name):
+                    if let val = env.lookup(name) {
+                        return val
+                    }
+                    else {
+                        throw RuntimeError<T>.NotBound(name)
+                    }
+
+                case .Let(let name, let expr, let body):
+                    let value = try go(expr, env: env)
+                    let newEnv = env.with(name, boundTo: value)
+                    return try go(body, env: newEnv)
+
+                case .Lambda(let name, let params, let body):
+                    func f(args: [Value<T>]) throws -> Value<T> {
+                        var newEnv = try env.with(names: params, boundTo: args)
+                        if let n = name {
+                            // Yikes: this is one way to get the lambda's name bound when it's
+                            // evaluated, but it ain't pretty. Is there a more natural way to
+                            // close this loop?
+                            newEnv = newEnv.with(n, boundTo: .Fn(arity: params.count, body: f))
+                        }
+                        return try go(body, env: newEnv)
+                    }
+                    return .Fn(arity: params.count, body: f)
+
+                case .App(let fn, let args):
+                    return try go(fn, env: env).withFn { (arity, f) in
+                        let argVs = try args.map { try go($0, env: env) }
+                        guard args.count == arity else {
+                            throw RuntimeError.ArityError(expected: arity, found: argVs)
+                        }
+                        return try f(argVs)
+                    }
+
+                case .Quote(let expand):
+                    return try expand { expr in
+                        try go(expr, env: env)
+                    }
+
+                case .Match(let expr, let bindings, let body, let otherwise, let match):
+                    let value = try go(expr, env: env)
+                    switch try match(value) {
+                    case .Matched(let boundValues):
+                        let newEnv = try env.with(names: bindings, boundTo: boundValues)
+                        return try go(body, env: newEnv)
+                    case .NoMatch:
+                        return try go(otherwise, env: env)
+                    }
+
+                case .Fail(let msg):
+                    return Value.Error(.UserError(message: msg))
                 }
-                return try eval(body, env: newEnv)
-            }
-            return .Fn(arity: params.count, body: f)
+        }
 
-        case .App(let fn, let args):
-            return try eval(fn, env: env).withFn { (arity, f) in
-                let argVs = try args.map { try eval($0, env: env) }
-                guard args.count == arity else {
-                    throw RuntimeError.ArityError(expected: arity, found: argVs)
-                }
-                return try f(argVs)
-            }
-
-        case .Quote(let expand):
-            return try expand { expr in
-                try eval(expr, env: env)
-            }
-
-        case .Match(let expr, let bindings, let body, let otherwise, let match):
-            let value = try eval(expr, env: env)
-            switch try match(value) {
-            case .Matched(let boundValues):
-                let newEnv = try env.with(names: bindings, boundTo: boundValues)
-                return try eval(body, env: newEnv)
-            case .NoMatch:
-                return try eval(otherwise, env: env)
-            }
-
-        case .Fail(let msg):
-            return Value.Error(.UserError(message: msg))
+        do {
+            return try go(node, env: env)
+        }
+        catch let error as RuntimeError<T> {
+            // Wrap the captured error as a value:
+            return .Error(error)
+        }
+        catch let error {
+            return .Error(.OtherError(message: "Unexpected error: \(error)"))
         }
     }
 }
