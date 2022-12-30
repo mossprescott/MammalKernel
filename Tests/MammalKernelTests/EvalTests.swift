@@ -55,11 +55,17 @@ final class EvalTests: XCTestCase {
         let prg = Expr.Lambda(nil, params: [x], body: .Var(x))
 
         switch Eval.eval(prg, env: env) {
-        case .Fn(let arity, let f):
-            XCTAssertEqual(arity, 1)
+        case .Closure(let name, let params, let body, let captured):
+            XCTAssertNil(name)
+            XCTAssertEqual(params.count, 1)
 
-            let result = try f([.Val(1)])
-            XCTAssertTrue(result.isVal(1))
+            // Well, it's missing for now, and this closure doesn't capture anything, so there's
+            // nothing to see anyway:
+            XCTAssertEqual(captured!.count, 0)
+
+            try Eval.eval(body, env: [x: .Val(1)]).withVal {
+                XCTAssertEqual($0, 1)
+            }
 
         default:
             XCTFail("expected Val")
@@ -70,7 +76,7 @@ final class EvalTests: XCTestCase {
     func testApp() throws {
         let f: UInt = 0
 
-        let identityFn: Value = .Fn(arity: 1) { args in args[0] }
+        let identityFn: Value = .NativeFn(arity: 1) { args in args[0] }
         let env: Env = [f: identityFn]
 
         let prg = Expr.App(fn: .Var(f), args: [.Literal(1)])
@@ -168,16 +174,20 @@ final class EvalTests: XCTestCase {
 //        let fact: UInt = 20
 
         // Easy case — no recursive call:
-        let factOne = Eval.eval(Expr.App(fn: factFn,
+        let factZero = Eval.eval(Expr.App(fn: factFn,
                                         args: [.Literal(0)]),
                                     env: builtInEnv)
-        XCTAssertTrue(factOne.isVal(1))
+        try factZero.withVal {
+            XCTAssertEqual($0, 1)
+        }
 
         // Now for the fun part — let's get recursive!
         let factFive = Eval.eval(Expr.App(fn: factFn,
                                           args: [.Literal(5)]),
                                      env: builtInEnv)
-        XCTAssertTrue(factFive.isVal(120))
+        try factFive.withVal {
+            XCTAssertEqual($0, 120)
+        }
     }
 
     /// A function can call itself a million times, if the calls are in tail position.
@@ -212,22 +222,22 @@ final class EvalTests: XCTestCase {
                                    env: builtInEnv)
         try result1.withVal { XCTAssertEqual($0, 21) }
 
-        let n2 = 1000*1000
+        let n2 = 100_000
         let result2 = Eval.eval(Expr.App(fn: fn, args: [.Literal(n2), .Literal(0)]),
                                    env: builtInEnv,
-                                budget: n2)
+                                maxSteps: n2*100)
         try result2.withVal { XCTAssertEqual($0, n2*(n2+1)/2) }
     }
 
-    func testMutualRecursion() {
+    func testMutualRecursion() throws {
         // TODO: a pair of functions that call each other a million times
-        XCTFail("TODO")
+        throw XCTSkip("TODO")
     }
 
 
 // MARK: - Error cases
 
-// In each case, the error is captured as an Expr.Val.Error
+// In each case, the error is captured as an Expr.Value.Error
 
     func testStackOverflow() throws {
         let plus: UInt = 0
@@ -263,10 +273,13 @@ final class EvalTests: XCTestCase {
         try result1.withVal { XCTAssertEqual($0, 21) }
 
         let n2 = 1000*1000
-        let result2 = Eval.eval(Expr.App(fn: fn, args: [.Literal(n2)]),
-                                   env: builtInEnv)
-        try result2.withVal { XCTAssertEqual($0, n2*(n2+1)/2) }
-
+        switch Eval.eval(Expr.App(fn: fn, args: [.Literal(n2)]),
+                         env: builtInEnv) {
+        case .Error(.StackOverflow):
+            print("Overflowed as expected")
+        default:
+            XCTFail("Should have produced an error")
+        }
     }
 
     /// This function makes a tail-recursive call, so uses no stack, but also never makes any progress, so it should get killed.
@@ -280,14 +293,14 @@ final class EvalTests: XCTestCase {
                                                            args: []))
         
         switch Eval.eval(Expr.App(fn: fn, args: []),
-                         env: [:]) {
+                         env: [:],
+                         maxSteps: 1_000_000) {
         case .Error(.TimeOut):
             print("Timed out as expected")
             //expect.fulfill()
         default:
             XCTFail("Should have produced an error")
         }
-//        result.withError { XCTAssertEqual($0, .TimeOut) }
 
 //        waitForExpectations(timeout: 1)
     }
@@ -313,7 +326,7 @@ final class EvalTests: XCTestCase {
 
     /// Lift a binary operator to a `Fn` value which will fail if its arguments aren't two ints.
     func liftBinary(f: @escaping (Int, Int) -> Int) -> Value {
-        Value.Fn(arity: 2) { args in
+        Value.NativeFn(arity: 2) { args in
             guard args.count == 2 else {
                 return .Error(Eval.RuntimeError.ArityError(expected: 2, found: args))
             }

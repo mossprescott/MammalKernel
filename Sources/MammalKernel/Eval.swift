@@ -134,10 +134,22 @@ public enum Eval {
     /// - unevaluated functions, which result from evaluating`Expr.Lambda` or may be "foreign" functions provided by the platform.
     /// - errors that occur during evaluation, which come with extra information to aid debugging
     public indirect enum Value<N: Hashable, T> {
+        /// A plain value.
         case Val(T)
 
+        /// A function which was defined using Lambda, capturing the expression, parameter names, and environment at the point
+        /// of definition.
+        ///
+        /// Note: these values contain the environment in terms of names that are only meaningful during evaluation. When inspected
+        /// after the fact, the environment will be missing. If we wanted to be able to inspect the environment, we would need to
+        /// use some more general Dictionary type, but for evaluation purposes we want something fast and lightweight, so it's
+        /// tricky.
+        ///
         /// TODO: optional `Expr` which was used to define the function (but which might contain free vars.)
-        case Fn(arity: Int, body: ([Value]) throws -> Value)
+        case Closure(name: N?, params: [N], body: Expr<N, T>, captured: SimpleTrie<Value>?)
+
+        /// A function which is defined externally. Can be a "library" function, or part of the machinery of implementing the platform.
+        case NativeFn(arity: Int, body: ([Value]) throws -> Value)
 
         /// These values can arise from error conditions during evaluation, or can be emitted directly using `Expr.Fail`.
         case Error(RuntimeError<N, T>)
@@ -148,7 +160,7 @@ public enum Eval {
             case .Val(let v):
                 return v == val
 
-            case .Fn(_, _), .Error(_):
+            default:
                 return false
             }
         }
@@ -158,43 +170,50 @@ public enum Eval {
             switch self {
             case .Val(let val):
                 return try handle(val)
-            case .Fn(_, _), .Error(_):
+            default:
                 throw RuntimeError<N, T>.TypeError(expected: ".Val", found: self)
             }
         }
 
-        /// Consume a value that's expected to be a function. If it's not, an error is thrown. Note: it's up to the
-        /// caller to check the arity.
-        public func withFn<U>(handle: (Int, ([Value]) throws -> Value) throws -> U) throws -> U {
-            switch self {
-            case .Fn(let arity, let fn):
-                return try handle(arity, fn)
-            case .Val(_), .Error(_):
-                throw RuntimeError<N, T>.TypeError(expected: ".Fn", found: self)
-            }
-        }
+//        /// Consume a value that's expected to be a function. If it's not, an error is thrown. Note: it's up to the
+//        /// caller to check the arity.
+//        public func withFn<U>(handle: (Int, ([Value]) throws -> Value) throws -> U) throws -> U {
+//            switch self {
+//            case .Fn(let arity, let fn):
+//                return try handle(arity, fn)
+//            case .Val(_), .Error(_):
+//                throw RuntimeError<N, T>.TypeError(expected: ".Fn", found: self)
+//            }
+//        }
 
         /// Consume a value that's expected to be an error. If it's not, an error is thrown.
         public func withError<U>(handle: (RuntimeError<N, T>) throws -> U) throws -> U {
             switch self {
             case .Error(let re):
                 return try handle(re)
-            case .Val(_), .Fn(_, _):
+            default:
                 throw RuntimeError<N, T>.TypeError(expected: ".Error", found: self)
             }
         }
 
-        /// Rewrite any name(s) that might be embedded in an error value.
+        /// Rewrite any name(s) that might be embedded in function and error values.
         func mapName<NN>(_ iso: Iso<N, NN>) -> Value<NN, T> {
             switch self {
-            // TODO: Unsafe casts?
             case .Val(let val): return .Val(val)
-            case .Fn(let a, let b):
+            case .Closure(let name, let params, let body, let captured):
+                // This is an edge case that happens when the final result of evaluation is a
+                // closure. The environment can only be used in the context of the names used during
+                // evaluation, so here … we do something bogus?
+                return .Closure(name: name.map(iso.map),
+                                params: params.map(iso.map),
+                                body: body.mapNames(iso),
+                                captured: captured?.mapValues { $0.mapName(iso) })
+            case .NativeFn(let a, let f):
                 func g(args: [Value<NN, T>]) throws -> Value<NN, T> {
                     let args1: [Value<N, T>] = args.map  { $0.mapName(iso.inverse) }
-                    return try b(args1).mapName(iso)
+                    return try f(args1).mapName(iso)
                 }
-                return .Fn(arity: a, body: g)
+                return .NativeFn(arity: a, body: g)
             case .Error(let e): return .Error(e.mapName(iso))
             }
         }
@@ -267,14 +286,20 @@ public enum Eval {
 
     /// Evaluate an expression, producing a value (which may be an error.)
     ///
+    /// Note: stack/step limits do not account for recursive calls inside native functions, expansion of quotations, and testing matches.
+    ///
     /// TODO: not public, if nobody needs to use it directly (except possibly tests)
     ///
     /// - Parameters:
-    ///   - budget: maximum "steps" of evaluation that should be performed before giving up and yielding a TimeOut
+    ///   - maxStack: maximum depth of recursive calls before giving up and yielding a `StackOverflow`.
+    ///   - maxSteps: maximum "steps" of evaluation that should be performed before giving up and yielding a `TimeOut`
     ///
     /// - Returns: the result value, if evaluation completes normally;
     ///   `RuntimeError.TimeOut` if evaluation isn't finished after `budget` steps
-    static public func eval<N: Hashable, T>(_ node: Expr<N, T>, env externalEnv: [N: Value<N, T>], budget: Int = 1000) -> Value<N, T> {
+    static public func eval<N: Hashable, T>(_ node: Expr<N, T>,
+                                            env externalEnv: [N: Value<N, T>],
+                                            maxStack: Int = 100,
+                                            maxSteps: Int = 100_000) -> Value<N, T> {
         typealias Env = SimpleTrie<Value<UInt, T>>
 
         func with(_ env: Env, _ name: UInt, boundTo val: Value<UInt, T>) -> Env {
@@ -293,20 +318,33 @@ public enum Eval {
         }
 
         var steps = 0
+        var depth = 0
 
         /// Inner evaluation loop.
         func go(_ startNode: Expr<UInt, T>, env startEnv: Env) throws -> Value<UInt, T> {
+            if depth > maxStack {
+                throw RuntimeError<N, T>.StackOverflow
+            }
+            depth += 1
+            defer {
+                // Decrement the stack depth on the way out (after any "return"). This is probably
+                // too clever; just make it an explicit parameter?
+                depth -= 1
+            }
+
             var node = startNode
             var env = startEnv
 
             while true {
-                if steps >= budget {
+                if steps >= maxSteps {
                     throw RuntimeError<N, T>.TimeOut
                 }
                 steps += 1
 
-//                var nextNode: Node
-//                var nextEnv: Env
+                // If there is a tail-call to make, the next evaluation context is written here and
+                // the loop continues. Otherwise, we just return.
+                var nextNode: Expr<UInt, T>
+                var nextEnv: Env
 
                 switch node {
                 case .Literal(let val):
@@ -326,48 +364,82 @@ public enum Eval {
                 case .Let(let name, let expr, let body):
                     let value = try go(expr, env: env)
                     let newEnv = with(env, name, boundTo: value)
-                    return try go(body, env: newEnv)
+
+                    nextNode = body
+                    nextEnv = newEnv
+                    // ... and loop
 
                 case .Lambda(let name, let params, let body):
-                    func f(args: [Value<UInt, T>]) throws -> Value<UInt, T> {
-                        var newEnv = try with(env, names: params, boundTo: args)
-                        if let n = name {
-                            // Yikes: this is one way to get the lambda's name bound when it's
-                            // evaluated, but it ain't pretty. Is there a more natural way to
-                            // close this loop?
-                            newEnv = with(newEnv, n, boundTo: .Fn(arity: params.count, body: f))
-                        }
-                        return try go(body, env: newEnv)
-                    }
-                    return .Fn(arity: params.count, body: f)
+                    // Capture the (entire) environment, along with the node, and leave it to App to
+                    // sort out.
+                    return .Closure(name: name, params: params, body: body, captured: env)
 
                 case .App(let fn, let args):
-                    return try go(fn, env: env).withFn { (arity, f) in
+                    // First evaluate fn. If it's callable, then evaluate the arguments.
+                    let fnVal = try go(fn, env: env)
+                    switch fnVal {
+                    case .Closure(let name, let params, let body, let captured):
+                        // Tricky: evaluate the arguments recursively, but loop to evaluate the body,
+                        // to avoid consuming stack.
+                        // Note: the arguments are evaluated in the current context (env)
+                        let argVs = try args.map { try go($0, env: env) }
+                        guard argVs.count == params.count else {
+                            throw RuntimeError.ArityError(expected: params.count, found: argVs)
+                        }
+
+                        // Note: the body is evaluated in the `captured` environment, plus the value
+                        // for each parameter.
+                        var newEnv = captured!
+                        if let name = name {
+                            newEnv[name] = fnVal
+                        }
+                        newEnv = try with(newEnv, names: params, boundTo: argVs)
+
+                        nextNode = body
+                        nextEnv = newEnv
+                        // ... and loop
+
+                    case .NativeFn(let arity, let f):
                         let argVs = try args.map { try go($0, env: env) }
                         guard args.count == arity else {
                             throw RuntimeError.ArityError(expected: arity, found: argVs)
                         }
+                        // Note: a native fn call always uses the stack
                         return try f(argVs)
+
+                    default:
+                        throw RuntimeError.TypeError(expected: "closure or native function", found: fnVal)
                     }
 
                 case .Quote(let expand):
-                    return try expand { expr in
+                    // Note: we do track evaluation steps and depth of stack within these
+                    // recursive calls, but if `expand` does its own evaluation, we can't see into it
+                    func resolve(_ expr: Expr<UInt, T>) throws -> Value<UInt, T> {
                         try go(expr, env: env)
                     }
+                    return try expand(resolve)
 
                 case .Match(let expr, let bindings, let body, let otherwise, let match):
                     let value = try go(expr, env: env)
                     switch try match(value) {
                     case .Matched(let boundValues):
                         let newEnv = try with(env, names: bindings, boundTo: boundValues)
-                        return try go(body, env: newEnv)
+                        nextNode = body
+                        nextEnv = newEnv
+                        // ... and loop
                     case .NoMatch:
-                        return try go(otherwise, env: env)
+                        nextNode = otherwise
+                        nextEnv = env
+                        // .. and loop
                     }
 
                 case .Fail(let msg):
                     return Value.Error(.UserError(message: msg))
                 }
+
+                // If we get here, we'll loop and continue with some new node and context.
+                node = nextNode
+                env = nextEnv
             }
         }
 

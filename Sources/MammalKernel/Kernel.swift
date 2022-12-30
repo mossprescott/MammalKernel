@@ -308,7 +308,7 @@ public enum Kernel {
             switch expandedVal {
             case .Val(let expandedChild):
                 return expandedChild
-            case .Fn(_, _):
+            case .Closure(_, _, _, _), .NativeFn(_, _):
                 throw Eval.RuntimeError.TypeError(expected: "normal value during quote expansion",
                                                   found: expandedVal)
             case .Error(let err):
@@ -530,10 +530,20 @@ public enum Kernel {
                             .Attrs([String_.value: .Prim(prim)]))
             }
 
-        case .Fn(let arity, _):
+        case .Closure(_, let params, _, _):
+            // TODO: translate body back into Node representation? Maybe construct an expression
+            // that binds the captured values? That would be pretty righteous. But to be useful,
+            // would probably need to preserve the source from before reduction, which sounds tricky.
+            return Node(nextId(),
+                        Fn.type,
+                        .Attrs([
+                            Fn.arity: .Prim(.Int(params.count))
+                        ]))
+        case .NativeFn(let arity, _):
             // TODO: Use information captured when the value was created to reproduce it in some way.
-            // For most functions, this would just be the source node. For capturing closures, could
-            // construct an expression that binds the captured values? That would be pretty righteous.
+            // That is, whatever source program we evaluated to get this native function (e.g. an
+            // an empty "lib/plus2" node.) But that would require capturing that information during
+            // reduction, since those nodes get reduced to simple, opaque Vars.
             return Node(nextId(),
                         Fn.type,
                         .Attrs([

@@ -252,17 +252,27 @@ public enum Reduce {
 
 //            print("lib: \(lib.keys)")
 
-            // Like Kernel.eval, but then match only a unary .Fn result (and yield the raw value)
+            // Like Kernel.eval, but then match only a unary function result (and yield the raw value)
             func evalToFn1(_ lambdaNode: Node) throws -> ((Node) throws -> Value) {
                 let ast = Kernel.translate(lambdaNode, constants: lib)
+                // Alternatively: construct an App that calls ast
+//                return { n in
+//                    Eval.eval(Expr.App(fn: ast, args: [...]))
+//                }
                 let result = Eval.eval(ast, env: [:])
                 switch result {
-                case .Fn(arity: 1, let f):
+                case .Closure(_, let params, let body, _):
+                    // Note: ignoring any captured environment, because… ?
+                    guard params.count == 1 else {
+                        throw Eval.RuntimeError.ArityError(expected: 1, found: [result])  // Abusing the "found" field here
+                    }
+                    return { n in Eval.eval(body, env: [params[0]: .Val(.Node(n))]) }
+                case .NativeFn(arity: 1, let f):
                     return { n in try f([.Val(.Node(n))]) }
-                case .Fn(_, _):
+                case .NativeFn(_, _):
                     throw Eval.RuntimeError.ArityError(expected: 1, found: [result])  // Abusing the "found" field here
                 default:
-                    throw Eval.RuntimeError.TypeError(expected: "unary Fn", found: result)
+                    throw Eval.RuntimeError.TypeError(expected: "unary function", found: result)
                 }
             }
 
@@ -276,10 +286,7 @@ public enum Reduce {
                 case .Val(.Prim(.Nil)):
                     return nil
 
-                case .Val(.Prim(_)):
-                    throw Eval.RuntimeError.TypeError(expected: "node", found: result)
-
-                case .Fn(_, _):
+                case .Val(.Prim(_)), .Closure(_, _, _, _), .NativeFn(_, _):
                     throw Eval.RuntimeError.TypeError(expected: "node", found: result)
 
                 case .Error(let err):
@@ -320,7 +327,7 @@ public enum Reduce {
     private static func makeResolver(within root: Node) -> Value {
         let nodesById = Node.Util.descendantsById(of: root)
 
-        return Eval.Value.Fn(arity: 1) { args in
+        return Eval.Value.NativeFn(arity: 1) { args in
             switch args[0] {
             case .Val(.Node(let node)):
                 if case .Ref(let target) = node.content,

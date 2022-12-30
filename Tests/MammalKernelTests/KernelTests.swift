@@ -543,7 +543,7 @@ final class KernelTests: XCTestCase {
 
     /// Lift a binary operator to a `Fn` value which will fail if its arguments aren't two ints.
     func liftIntBinary(f: @escaping (Int, Int) -> Node.Value) -> Value {
-        Value.Fn(arity: 2) { args in
+        Value.NativeFn(arity: 2) { args in
             guard args.count == 2 else {
                 throw Eval.RuntimeError.ArityError(expected: 2, found: args)
             }
