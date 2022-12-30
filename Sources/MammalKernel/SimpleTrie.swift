@@ -28,7 +28,7 @@ public struct SimpleTrie<Value> {
     @usableFromInline
     var node: Node
 
-    public init() {
+    init() {
         node = SimpleTrie<Value>.empty()
     }
 
@@ -151,17 +151,56 @@ extension SimpleTrie: Sequence {
     }
 
     public func makeIterator() -> Iterator {
-        return Iterator()
+        return Iterator(self)
     }
 
     public class Iterator: IteratorProtocol {
+        let trie: SimpleTrie
         var nextIndex: UInt = 0
 
-        public func next() -> (UInt, Value)? {
-           // if nextIndex < capacity()
-            // TODO
-            fatalError("TODO")
+        init(_ trie: SimpleTrie) {
+            self.trie = trie
         }
+
+        public func next() -> (key: UInt, value: Value)? {
+            let capacity = trie.capacity()
+
+            // skip empty slots:
+            while nextIndex < capacity && trie[nextIndex] == nil {
+                nextIndex += 1
+            }
+            if nextIndex < capacity, let val = trie[nextIndex] {
+                let result = (key: nextIndex, value: val)
+                nextIndex += 1
+                return result
+            }
+            else {
+                return nil
+            }
+        }
+    }
+}
+
+extension SimpleTrie {
+    /// O(n)
+    public func mapValues<T>(_ transform: (Value) throws -> T) rethrows -> SimpleTrie<T> {
+        var result = SimpleTrie<T>()
+        for (k, v) in self {
+            result[k] = try transform(v)
+        }
+        return result
+    }
+}
+
+extension SimpleTrie: ExpressibleByDictionaryLiteral {
+    public typealias Key = UInt
+
+    public init(dictionaryLiteral elements: (UInt, Value)...) {
+        var tr = SimpleTrie()
+        for (k, v) in elements {
+            tr[k] = v
+        }
+        node = tr.node
     }
 }
 
@@ -169,7 +208,13 @@ extension SimpleTrie: Sequence {
 
 extension SimpleTrie: CustomDebugStringConvertible {
     public var debugDescription: String {
-        return "trie..."
-        // TODO: summarize the tree structure?
+        (["["] + Array(self).map { (k, v) in "\(k): \(v)," } + ["]"]).joined(separator: ", ")
+    }
+}
+
+extension SimpleTrie: CustomReflectable {
+    public var customMirror: Mirror {
+//        let nonNil: Dictionary<String?, Value> = Dictionary(uniqueKeysWithValues: )
+        Mirror(self, children: self.map { (k, v) in (String(k), v)}, displayStyle: .dictionary)
     }
 }
