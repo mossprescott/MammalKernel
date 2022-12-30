@@ -131,6 +131,4 @@ class SimpleTrieTests: XCTestCase {
         print("sum: \(sum)")
         print("capacity: \(map.capacity())")
     }
-
-
 }
