@@ -2,8 +2,9 @@ import XCTest
 import MammalKernel
 
 final class KernelTests: XCTestCase {
+    typealias Value = Kernel.Value
 
-// MARK: - ?
+// MARK: - Simple
 
     let gen = KernelGen()
 
@@ -165,9 +166,9 @@ final class KernelTests: XCTestCase {
         let ageAttr = AttrName(personType, "age")
 
         let nameConstantType = NodeType("test-builtin", "name")
-        let nameConstantValue: Eval.Value<Node.Value> = .Val(.Prim(.String("Steve")))
+        let nameConstantValue: Value = .Val(.Prim(.String("Steve")))
         let ageConstantType = NodeType("test-builtin", "age")
-        let ageConstantValue: Eval.Value<Node.Value> = .Val(.Prim(.Int(42)))
+        let ageConstantValue: Value = .Val(.Prim(.Int(42)))
         let builtin = [
             nameConstantType: nameConstantValue,
             ageConstantType: ageConstantValue,
@@ -206,7 +207,7 @@ final class KernelTests: XCTestCase {
         }
 
         let intsConstantType = NodeType("test-builtin", "ints")
-        let intsConstantValue: Eval.Value<Node.Value> =
+        let intsConstantValue: Value =
             .Val(.Node(
                     Node(NodeId(1),
                          NodeType("test", "ints"),
@@ -246,7 +247,7 @@ final class KernelTests: XCTestCase {
 //    /// macro expansion. For simplicity, the captured value is just a constant.
 //    func testQuoteLambda() throws {
 //        let capturedType = NodeType("test-builtin", "x")
-//        let capturedValue: Eval.Value<Node.Value> = .Val(.Prim(.Int(42)))
+//        let capturedValue: Value = .Val(.Prim(.Int(42)))
 //        let builtin = [
 //            capturedType: capturedValue,
 //        ]
@@ -264,7 +265,7 @@ final class KernelTests: XCTestCase {
 
     func testQuotedQuote() throws {
         let fType = NodeType("test-builtin", "f")  // Note: never actually evaluated.
-        let builtin: [NodeType: Eval.Value<Node.Value>] = [:]
+        let builtin: [NodeType: Value] = [:]
 
         // kernel/int, but accepting an arbitrary node (i.e. an unquote)
         func genInt(_ val: Node) -> Node {
@@ -312,7 +313,7 @@ final class KernelTests: XCTestCase {
 
     func testQuotedQuoteWithUnquotedUnquote() throws {
         let fType = NodeType("test-builtin", "f")  // Note: never actually evaluated.
-        let builtin: [NodeType: Eval.Value<Node.Value>] = [:]
+        let builtin: [NodeType: Value] = [:]
 
         // kernel/int, but accepting an arbitrary node (i.e. an unquote)
         func genInt(_ val: Node) -> Node {
@@ -541,8 +542,8 @@ final class KernelTests: XCTestCase {
 // MARK: - Common utility functions
 
     /// Lift a binary operator to a `Fn` value which will fail if its arguments aren't two ints.
-    func liftIntBinary(f: @escaping (Int, Int) -> Node.Value) -> Eval.Value<Node.Value> {
-        Eval.Value<Node.Value>.Fn(arity: 2) { args in
+    func liftIntBinary(f: @escaping (Int, Int) -> Node.Value) -> Value {
+        Value.Fn(arity: 2) { args in
             guard args.count == 2 else {
                 throw Eval.RuntimeError.ArityError(expected: 2, found: args)
             }

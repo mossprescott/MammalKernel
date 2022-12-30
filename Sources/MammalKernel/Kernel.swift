@@ -10,11 +10,11 @@ public enum Kernel {
 
     /// The type of expressions after decoding from the raw Node representation. This is just `Eval.Expr`, specialized to the value
     /// type for kernel programs (nodes and primitives.)
-    public typealias Expr = Eval.Expr<Node.Value>
+    public typealias Expr = Eval.Expr<Int, Node.Value>
 
     /// The type of values that can appear as attributes in program nodes. This is just `Eval.Value`, specialized to the value
     /// type for kernel programs (nodes and primitives.)
-    public typealias Value = Eval.Value<Node.Value>
+    public typealias Value = Eval.Value<Int, Node.Value>
 
     /// Evaluate/execute a program by translating it to the `Eval` AST, evaluating it, and
     /// then translating the resulting value back into a source-level representation.
@@ -25,7 +25,7 @@ public enum Kernel {
     public static func eval(_ program: Node, constants: [NodeType: Value]) throws -> Node {
         let ast = translate(program, constants: constants)
 
-        let result = try Eval.eval(ast, env: .Empty)
+        let result = Eval.eval(ast, env: [:])
 
         return repr(result)
     }
@@ -76,7 +76,7 @@ public enum Kernel {
         case Var.type:
             switch node.content {
             case .Ref(let target):
-                return .Var(Eval.Name(id: target.id)) // TODO: look under "ref"
+                return .Var(target.id) // TODO: look under "ref"
 
             default:
                 return .Fail(message: "Var is not a Ref at node \(node.id)")
@@ -95,7 +95,7 @@ public enum Kernel {
                 .mapRight { bindId in
                     let expr = requiredExpr(node, Let.expr, handle: translateChild)
                     let body = requiredExpr(node, Let.body, handle: translateChild)
-                    return .Let(Eval.Name(id: bindId.id), expr: expr, body: body)
+                    return .Let(bindId.id, expr: expr, body: body)
                 }
                 .merge()
 
@@ -112,8 +112,8 @@ public enum Kernel {
                 }
                 .mapRight { paramNodes in
                     let body = requiredExpr(node, Kernel.Lambda.body, handle: translateChild)
-                    return .Lambda(Eval.Name(id: node.id.id),
-                                   params: paramNodes.map { n in Eval.Name(id: n.id.id) },
+                    return .Lambda(node.id.id,
+                                   params: paramNodes.map { n in n.id.id },
                                    body: body)
                 }
                 .merge()
@@ -164,7 +164,7 @@ public enum Kernel {
                     let bindings = findBindings(inPattern: pattern)
                     
                     return .Match(expr: expr,
-                                  bindings: bindings.map { Eval.Name(id: $0.id) },
+                                  bindings: bindings.map { $0.id },
                                   body: body,
                                   otherwise: otherwise) { rv in
                         switch rv {
@@ -240,7 +240,7 @@ public enum Kernel {
     /// so it can throw RuntimeError, in keeping with the way those errors are currently handled.
     static func expandQuotedNode(_ root: Node,
                                  constants: [NodeType: Value],
-                                 eval: Eval.EvalInContext<Node.Value>)
+                                 eval: Eval.EvalInContext<Int, Node.Value>)
                                         throws -> Value {
 
         let nextId = IdGen.Shared.generateId
@@ -281,7 +281,7 @@ public enum Kernel {
                         return try expanded.map { val -> Node in
                             switch val {
                             case .Prim(let expandedVal):
-                                throw Eval.RuntimeError<Node.Value>.TypeError(
+                                throw Eval.RuntimeError<Int, Node.Value>.TypeError(
                                     expected: "node for Elems during quote expansion",
                                     found: .Val(.Prim(expandedVal)))
                             case .Node(let expandedChild):
@@ -326,7 +326,7 @@ public enum Kernel {
                     return elems.map { .Node($0) }
                 }
                 else {
-                    throw Eval.RuntimeError.TypeError(expected: "sequence node",
+                    throw Eval.RuntimeError<Int, Value>.TypeError(expected: "sequence node",
                                                       found: .Val(expanded))
                 }
             }
@@ -403,7 +403,7 @@ public enum Kernel {
 
     /// Compare the node which appears as the pattern in a Match expression with a value that arises at runtime. If the value is a
     /// match, then also extract the value for each binding that appears in the pattern.
-    static func matchAndBind(pattern: Node, withValue runtimeValue: Node.Value) -> Eval.MatchResult<Node.Value> {
+    static func matchAndBind(pattern: Node, withValue runtimeValue: Node.Value) -> Eval.MatchResult<Int, Node.Value> {
         // Convert back to source representation:
         let rtNode = repr(.Val(runtimeValue))
 
@@ -531,6 +531,9 @@ public enum Kernel {
             }
 
         case .Fn(let arity, _):
+            // TODO: Use information captured when the value was created to reproduce it in some way.
+            // For most functions, this would just be the source node. For capturing closures, could
+            // construct an expression that binds the captured values? That would be pretty righteous.
             return Node(nextId(),
                         Fn.type,
                         .Attrs([

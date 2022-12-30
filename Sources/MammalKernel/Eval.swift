@@ -6,6 +6,15 @@
  programs (which is relatively fixed and trivial) and the more subtle business of
  encoding programs into a richer type which can encode both values and expressions.
 
+ Fancy stuff:
+
+ - Tail-call optimization: simple recursive programs consume no stack and no heap, which is
+   necessary since we have no other way of doing iteration.
+
+ - Monitoring: evaluation is halted after a pre-determined number of evaluation steps. This prevents
+   a non-terminating program from making the system unusable, and should behave more predictably
+   than, say, a clock-based timeout.
+
  Not yet implemented:
 
  - a better story on errors: should it be possible to trap and recover when (some kinds of)
@@ -17,12 +26,7 @@
    should be possible to recover from that kind of error, and continue evaluating the rest
    of the program.
 
- - efficiency: haven't even thought about it, really. Is it bad that every variable
-   reference is a linear lookup? Probably, yes.
-
- - tail-calls: this language has no iteration mechasism, so we need to be able to
-   use recursion instead. It will be fun embedding that in Swift (probably using
-   iteration.)
+ - efficiency: haven't even thought about it, really.
 
  - run-time code generation:
    The evaluator defined here is a simple interpreter, however the idea is that the
@@ -45,21 +49,23 @@ public enum Eval {
 
 // MARK: - AST
 
-    /// A name identifies a storage location or other globally unique resource.
-    /// Somebody needs to take responsibility for generating them and keeping track.
-    public struct Name: Hashable {
-        var id: Int
-
-        /// TODO: hide this and/or add a mechanism to generate unique names
-        public init(id: Int) {
-            self.id = id
-        }
-    }
+    // Note: you can now use any Hashable type for names. Should we still provide some simple
+    // wrapper like this?
+//    /// A name identifies a storage location or other globally unique resource.
+//    /// Somebody needs to take responsibility for generating them and keeping track.
+//    public struct Name: Hashable {
+//        var id: Int
+//
+//        /// TODO: hide this and/or add a mechanism to generate unique names
+//        public init(id: Int) {
+//            self.id = id
+//        }
+//    }
 
     /// AST for the (abstract) Mammel kernel language, consisting of *expressions* which can be *evaluated* to produce values of
     /// some type `T`.
-    public indirect enum Expr<T> {
-        /// Evaluates to a fixed value.
+    public indirect enum Expr<N: Hashable, T> {
+        /// A fixed value.
         case Literal(_: T)
 
         /// Evaluates to a fixed value, which may be a runtime function or error, not just an ordinary value.
@@ -69,19 +75,19 @@ public enum Eval {
         /// no need for the `Value` type to appear in the AST.
         ///
         /// If this is a legitimate need, then probably `Literal` should just take this kind of `Value`.
-        case RuntimeLiteral(_: Value<T>)
+        case RuntimeLiteral(_: Value<N, T>)
 
         /// Looks up a value which has somehow been bound in the environment under a certain name.
-        case Var(_: Name)
+        case Var(_: N)
 
         /// Evaluates some expression, stores the result under a name in a new scope, and
         /// then evaluates its `body` in that environment.
-        case Let(_: Name, expr: Expr, body: Expr)
+        case Let(_: N, expr: Expr, body: Expr)
 
         /// Constructs an unevaluated function, which can later be applied to some arguments via `App`.
         /// Note: if a name is provided, it is bound to the function itself when the body is evaluated,
         /// so that directly recursive functions can be defined.
-        case Lambda(Name?, params: [Name], body: Expr)
+        case Lambda(N?, params: [N], body: Expr)
 
         /// Applies a function to some arguments:
         /// - evaluate `fn` to a value, which must be an unevaluated function
@@ -93,28 +99,28 @@ public enum Eval {
 
         /// Expands a partially-constructed value, which may involve sub-expressions which need to be
         /// evaluated in the current scope. 
-        case Quote(expand: (EvalInContext<T>) throws -> Value<T>)
+        case Quote(expand: (EvalInContext<N, T>) throws -> Value<N, T>)
 
         /// Attempts to match the value of an expression against some externally-defined pattern. If the
         /// match succeeds, it produces a value for each binding, and `body` is evaluated with them in scope.
         /// If not, no new names are bound, and `otherwise` is evaluated instead.
         /// If the match succeeds but produces the wrong number of values, then an error is thrown, but if the match
         /// produces values in an unexpected order, then hilarity ensues.
-        case Match(expr: Expr, bindings: [Name], body: Expr, otherwise: Expr, match: MatchAndBind<T>)
+        case Match(expr: Expr, bindings: [N], body: Expr, otherwise: Expr, match: MatchAndBind<N, T>)
 
         /// Construct an error value and yield it, interrupting most ongoing evaluation.
         case Fail(message: String)
     }
 
     /// Type for the function you use to look up values embedded in quotations. One of these is provided by the evaluator for your use.
-    public typealias EvalInContext<T> = (Expr<T>) throws -> Value<T>
+    public typealias EvalInContext<N: Hashable, T> = (Expr<N, T>) throws -> Value<N, T>
 
     /// Type for helper functions used with `Expr.Match`. You provide one of these when you construct a Match expression.
-    public typealias MatchAndBind<T> = (Value<T>) throws -> MatchResult<T>
+    public typealias MatchAndBind<N: Hashable, T> = (Value<N, T>) throws -> MatchResult<N, T>
 
     /// Isomorphic to `[Value<T>]?`, but less confusing, especially when the result is `[]`.
-    public enum MatchResult<T> {
-        case Matched([Value<T>])
+    public enum MatchResult<N: Hashable, T> {
+        case Matched([Value<N, T>])
         case NoMatch
     }
 
@@ -127,14 +133,14 @@ public enum Eval {
     /// Run-time-only values include:
     /// - unevaluated functions, which result from evaluating`Expr.Lambda` or may be "foreign" functions provided by the platform.
     /// - errors that occur during evaluation, which come with extra information to aid debugging
-    public indirect enum Value<T> {
+    public indirect enum Value<N: Hashable, T> {
         case Val(T)
 
         /// TODO: optional `Expr` which was used to define the function (but which might contain free vars.)
         case Fn(arity: Int, body: ([Value]) throws -> Value)
 
         /// These values can arise from error conditions during evaluation, or can be emitted directly using `Expr.Fail`.
-        case Error(RuntimeError<T>)
+        case Error(RuntimeError<N, T>)
 
         /// True if this is a simple value equal to the given. There's no simple way to compare Fn values.
         public func isVal(_ val: T) -> Bool where T: Equatable {
@@ -153,7 +159,7 @@ public enum Eval {
             case .Val(let val):
                 return try handle(val)
             case .Fn(_, _), .Error(_):
-                throw RuntimeError.TypeError(expected: ".Val", found: self)
+                throw RuntimeError<N, T>.TypeError(expected: ".Val", found: self)
             }
         }
 
@@ -164,37 +170,57 @@ public enum Eval {
             case .Fn(let arity, let fn):
                 return try handle(arity, fn)
             case .Val(_), .Error(_):
-                throw RuntimeError.TypeError(expected: ".Fn", found: self)
+                throw RuntimeError<N, T>.TypeError(expected: ".Fn", found: self)
             }
         }
 
-        public func withError<U>(handle: (RuntimeError<T>) throws -> U) throws -> U {
+        /// Consume a value that's expected to be an error. If it's not, an error is thrown.
+        public func withError<U>(handle: (RuntimeError<N, T>) throws -> U) throws -> U {
             switch self {
             case .Error(let re):
                 return try handle(re)
             case .Val(_), .Fn(_, _):
-                throw RuntimeError.TypeError(expected: ".Error", found: self)
+                throw RuntimeError<N, T>.TypeError(expected: ".Error", found: self)
+            }
+        }
+
+        /// Rewrite any name(s) that might be embedded in an error value.
+        func mapName<NN>(_ iso: Iso<N, NN>) -> Value<NN, T> {
+            switch self {
+            // TODO: Unsafe casts?
+            case .Val(let val): return .Val(val)
+            case .Fn(let a, let b):
+                func g(args: [Value<NN, T>]) throws -> Value<NN, T> {
+                    let args1: [Value<N, T>] = args.map  { $0.mapName(iso.inverse) }
+                    return try b(args1).mapName(iso)
+                }
+                return .Fn(arity: a, body: g)
+            case .Error(let e): return .Error(e.mapName(iso))
             }
         }
     }
 
     /// Errors in the structure of Expressions (i.e. "static" errors.)
-    /// Given there's no type system, are there static errors?
+    /// Given there's no type system, are there static errors? Examples might be things like bad nesting of quotations and references
+    /// variables that aren't in scope.
     public enum EvaluationError: Error {
         // TODO: ?
     }
 
     /// Errors that can occur during evaluation of a statically valid program.
-    public enum RuntimeError<T>: Error {
+    public enum RuntimeError<N: Hashable, T>: Error {
         /// For example, a function was expected and some other value was found.
-        case TypeError(expected: String, found: Value<T>)
+        case TypeError(expected: String, found: Value<N, T>)
 
         /// Tried to apply a function to the wrong number of arguments.
-        case ArityError(expected: Int, found: [Value<T>])
+        case ArityError(expected: Int, found: [Value<N, T>])
 
         /// Tried to refer to a bound variable, and it wasn't found in the current scope.
         /// This is actually a "static" error, probably, depending on the semantics…
-        case NotBound(_: Name)
+        case NotBound(_: N)
+
+        /// Evaluation made more recursive calls than the runtime could handle.
+        case StackOverflow
 
         /// Evaluation went on too long without producing a result, and was killed to avoid hanging the system.
         case TimeOut
@@ -205,49 +231,29 @@ public enum Eval {
 
         /// For any unanticipated need.
         case OtherError(message: String)
-    }
 
-// MARK: - Environment/Scope
-
-    public indirect enum Environment<T> {
-        case Empty
-        case Scope(name: Name, value: Value<T>, parent: Environment<T>)
-
-        /// New scope with exactly one bound name. Meant to read better than `.Empty.with(...)`.
-        public static func bindOne<T>(_ name: Name, to val: Value<T>) -> Environment<T> {
-            return .Scope(name: name, value: val, parent: .Empty)
-        }
-
-        public func with(_ name: Name, boundTo val: Value<T>) -> Environment<T> {
-            .Scope(name: name, value: val, parent: self)
-        }
-
-        /// A common pattern is to bind a series of names, for example function arguments. Here, check that
-        /// the two lists have the same length and call it an arity errror if not. Note: this probably makes it too easy
-        /// to mix up the order and cause confusion, but there's basically no way to enforce that short of a type
-        /// system.
-        public func with(names: [Name], boundTo vals: [Value<T>]) throws -> Environment<T> {
-            guard names.count == vals.count else {
-                throw RuntimeError.ArityError(expected: names.count, found: vals)
-            }
-            return zip(names, vals).reduce(self) { (e, t) in
-                e.with(t.0, boundTo: t.1)
-            }
-        }
-
-        public func lookup(_ name: Name) -> Value<T>? {
+        func mapName<NN>(_ iso: Iso<N, NN>) -> RuntimeError<NN, T> {
             switch self {
-            case .Empty:
-                return nil
+            case .NotBound(let name):
+                return .NotBound(iso.map(name))
+            case .TypeError(let exp, let found):
+                return .TypeError(expected: exp, found: found.mapName(iso))
+            case .ArityError(let exp, let found):
+                return .ArityError(expected: exp, found: found.map { $0.mapName(iso) })
 
-            case .Scope(name, let val, _):
-                return val
-
-            case .Scope(_, _, let parent):
-                return parent.lookup(name)
+ // TODO: unsafe casts?
+            case .StackOverflow:
+                return .StackOverflow
+            case .TimeOut:
+                return .TimeOut
+            case .UserError(let msg):
+                return .UserError(message: msg)
+            case .OtherError(let msg):
+                return .OtherError(message: msg)
             }
         }
     }
+
 
 // MARK: - Evaluation
 
@@ -259,21 +265,48 @@ public enum Eval {
     //    fatalError("TODO")
     //}
 
+    /// Evaluate an expression, producing a value (which may be an error.)
+    ///
     /// TODO: not public, if nobody needs to use it directly (except possibly tests)
     ///
     /// - Parameters:
     ///   - budget: maximum "steps" of evaluation that should be performed before giving up and yielding a TimeOut
     ///
-    /// - Returns: a value if evaluation completes normally
-    /// - Returns: `RuntimeError.TimeOut` if evaluation isn't finished after `budget` steps
-    static public func eval<T>(_ node: Expr<T>, env: Environment<T>, budget: Int = 1000) -> Value<T> {
-        var remainingBudget = budget
+    /// - Returns: the result value, if evaluation completes normally;
+    ///   `RuntimeError.TimeOut` if evaluation isn't finished after `budget` steps
+    static public func eval<N: Hashable, T>(_ node: Expr<N, T>, env externalEnv: [N: Value<N, T>], budget: Int = 1000) -> Value<N, T> {
+        typealias Env = SimpleTrie<Value<UInt, T>>
 
-        func go(_ node: Expr<T>, env: Environment<T>) throws -> Value<T> {
-            if remainingBudget <= 0 {
-                throw RuntimeError<T>.TimeOut
+        func with(_ env: Env, _ name: UInt, boundTo val: Value<UInt, T>) -> Env {
+            var newEnv = env
+            newEnv[name] = val
+            return newEnv
+        }
+
+        func with(_ env: Env, names: [UInt], boundTo vals: [Value<UInt, T>]) throws -> Env {
+            guard names.count == vals.count else {
+                throw RuntimeError.ArityError(expected: names.count, found: vals)
             }
-            remainingBudget = remainingBudget - 1
+            return zip(names, vals).reduce(env) { (e, t) in
+                with(e, t.0, boundTo: t.1)
+            }
+        }
+
+        var steps = 0
+
+        /// Inner evaluation loop.
+        func go(_ startNode: Expr<UInt, T>, env startEnv: Env) throws -> Value<UInt, T> {
+            var node = startNode
+            var env = startEnv
+
+            while true {
+                if steps >= budget {
+                    throw RuntimeError<N, T>.TimeOut
+                }
+                steps += 1
+
+//                var nextNode: Node
+//                var nextEnv: Env
 
                 switch node {
                 case .Literal(let val):
@@ -283,26 +316,26 @@ public enum Eval {
                     return val
 
                 case .Var(let name):
-                    if let val = env.lookup(name) {
+                    if let val = env[name] {
                         return val
                     }
                     else {
-                        throw RuntimeError<T>.NotBound(name)
+                        throw RuntimeError<UInt, T>.NotBound(name)
                     }
 
                 case .Let(let name, let expr, let body):
                     let value = try go(expr, env: env)
-                    let newEnv = env.with(name, boundTo: value)
+                    let newEnv = with(env, name, boundTo: value)
                     return try go(body, env: newEnv)
 
                 case .Lambda(let name, let params, let body):
-                    func f(args: [Value<T>]) throws -> Value<T> {
-                        var newEnv = try env.with(names: params, boundTo: args)
+                    func f(args: [Value<UInt, T>]) throws -> Value<UInt, T> {
+                        var newEnv = try with(env, names: params, boundTo: args)
                         if let n = name {
                             // Yikes: this is one way to get the lambda's name bound when it's
                             // evaluated, but it ain't pretty. Is there a more natural way to
                             // close this loop?
-                            newEnv = newEnv.with(n, boundTo: .Fn(arity: params.count, body: f))
+                            newEnv = with(newEnv, n, boundTo: .Fn(arity: params.count, body: f))
                         }
                         return try go(body, env: newEnv)
                     }
@@ -326,7 +359,7 @@ public enum Eval {
                     let value = try go(expr, env: env)
                     switch try match(value) {
                     case .Matched(let boundValues):
-                        let newEnv = try env.with(names: bindings, boundTo: boundValues)
+                        let newEnv = try with(env, names: bindings, boundTo: boundValues)
                         return try go(body, env: newEnv)
                     case .NoMatch:
                         return try go(otherwise, env: env)
@@ -335,30 +368,151 @@ public enum Eval {
                 case .Fail(let msg):
                     return Value.Error(.UserError(message: msg))
                 }
+            }
         }
 
-        do {
-            return try go(node, env: env)
+        // Re-assign names for fast binding/lookup:
+        // Uh, so, this doesn't work for interesting cases because more nodes can be produced
+        // during evaluation (e.g. when unquotes are expanded). We'll have to be able to add new ids
+        // to the mapping as we encounter them.
+        // Also, names from the provided environment might not be referenced until later, so they
+        // also need to get added to the mapping from the start.
+        // Given all that, would it be simpler just to use a proper (hash-)map and not try to do
+        // any of this rewriting jazz?
+        let idxToName: [N] = Array(node.collectNames())
+        let nameToIdx = Dictionary<N, UInt>(idxToName.enumerated().map { (idx, name) in (name, UInt(idx)) },
+                                            uniquingKeysWith: { (k1, k2) in k1 })
+        let nameIso: Iso<N, UInt> = Iso(
+            map: { nameToIdx[$0]! },
+            unmap: { idx in idxToName[Int(idx)] })
+
+        var env: Env = SimpleTrie()
+        for (n, v) in externalEnv {
+            env[nameToIdx[n]!] = v.mapName(nameIso)
         }
-        catch let error as RuntimeError<T> {
+
+        let renamedRoot: Expr<UInt, T> = node.mapNames(nameIso)
+
+        do {
+            let result = try go(renamedRoot, env: env)
+            return result.mapName(nameIso.inverse)
+        }
+        catch let re as RuntimeError<UInt, T> {
             // Wrap the captured error as a value:
-            return .Error(error)
+            return .Error(re.mapName(nameIso.inverse))
         }
         catch let error {
             return .Error(.OtherError(message: "Unexpected error: \(error)"))
         }
     }
+
+//    /// Private wrapper for RuntimeErrors so we can use exception handling to capture them. Outside of this function, they're just
+//    /// ordinary values.
+//    fileprivate struct ThrowableRuntimeError<T>: Error {
+//        var error: RuntimeError<T>
+//    }
 }
 
-// MARK: - Debugging aids
+/// A random FP concept that leaked in: a bi-directional mapping from one type to another. To be useful, the mapping should be
+/// one-to-one, but practically speaking we'll use it with types that have some values we don't care about, so if either function ever fails
+/// it will have to do so fatally.
+struct Iso<A, B> {
+    /// aka `view`
+    var map: (A) -> B
+    /// aka `review`
+    var unmap: (B) -> A
 
-extension Eval.Environment: CustomDebugStringConvertible {
-    public var debugDescription: String {
-        switch self {
-        case .Empty:
-            return "<empty>"
-        case .Scope(let name, let value, let parent):
-            return parent.debugDescription + "\n\(name.id) = \(value)"
+    var inverse: Iso<B, A> {
+        Iso<B, A>(map: unmap, unmap: map)
+    }
+}
+
+extension Eval.Expr {
+    func collectNames() -> Set<N> {
+        var names: Set<N> = Set()
+
+        func go(_ expr: Eval.Expr<N, T>) {
+            switch expr {
+            case .Literal(_):
+                break
+            case .RuntimeLiteral(_):
+                // TODO: can names be buried in, say, .Fn, in a way we could deal with here?
+                break
+            case .Var(let target):
+                names.insert(target)
+            case .Let(let name, expr: let expr, body: let body):
+                names.insert(name)
+                go(expr)
+                go(body)
+            case .Lambda(let name, params: let params, body: let body):
+                if let name = name {
+                    names.insert(name)
+                }
+                params.forEach { names.insert($0) }
+                go(body)
+            case .App(fn: let fn, args: let args):
+                go(fn)
+                args.forEach(go)
+            case .Quote(expand: _):
+                // TODO: somehow defer and capture/translate names on both sides of embedded expressions?
+                break
+            case .Match(expr: let expr, bindings: let bindings, body: let body, otherwise: let otherwise, match: _):
+                go(expr)
+                bindings.forEach { names.insert($0) }
+                go(body)
+                go(otherwise)
+                // TODO: maybe nothing here because values only go into the match function?
+                // something(match)
+            case .Fail(message: _):
+                break
+            }
         }
+
+        go(self)
+
+        return names
+    }
+
+    func mapNames<NN>(_ iso: Iso<N, NN>) -> Eval.Expr<NN, T> {
+        func go(_ expr: Eval.Expr<N, T>) -> Eval.Expr<NN, T> {
+            switch expr {
+            case .Literal(let val):
+                return .Literal(val)
+            case .RuntimeLiteral(let val):
+                return .RuntimeLiteral(val.mapName(iso))
+            case .Var(let target):
+                return .Var(iso.map(target))
+            case .Let(let name, expr: let expr, body: let body):
+                return .Let(iso.map(name), expr: go(expr), body: go(body))
+            case .Lambda(let name, params: let params, body: let body):
+                return .Lambda(name.map(iso.map), params: params.map(iso.map), body: go(body))
+            case .App(fn: let fn, args: let args):
+                return .App(fn: go(fn), args: args.map(go))
+            case .Quote(expand: let expand):
+                // TODO: some of these lookups are going to fail...
+                func expand1(_ f: (Eval.Expr<NN, T>) throws -> Eval.Value<NN, T>) throws -> Eval.Value<NN, T> {
+                    func g(_ expr: Eval.Expr<N, T>) throws -> Eval.Value<N, T> {
+                        return try f(go(expr)).mapName(iso.inverse)
+                    }
+                    return try expand(g).mapName(iso)
+                }
+                return .Quote(expand: expand1)
+            case .Match(expr: let expr, bindings: let bindings, body: let body, otherwise: let otherwise, match: let match):
+                func match1(_ val: Eval.Value<NN, T>) throws -> Eval.MatchResult<NN, T> {
+                    let val1 = val.mapName(iso.inverse)
+                    switch try match(val1) {
+                    case .Matched(let vals):
+                        return .Matched(vals.map { $0.mapName(iso) })
+                    case .NoMatch:
+                        return .NoMatch
+                    }
+                }
+                return .Match(expr: go(expr), bindings: bindings.map(iso.map), body: go(body), otherwise: go(otherwise), match: match1)
+            case .Fail(message: let msg):
+                return .Fail(message: msg)
+            }
+        }
+
+        return go(self)
     }
 }

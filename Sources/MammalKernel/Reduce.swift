@@ -12,6 +12,7 @@
 /// way (i.e. as trivial kernel lambdas); when they're applied by one of these reduction strategies, all the potential pitfalls are handled
 /// for you.
 public enum Reduce {
+    public typealias Value = Eval.Value<Int, Node.Value>
 
     /// Generalized reduction function. Consumes an arbitrary input and applies some predefined transformations, yielding an output,
     /// plus a mapping which records what nodes in the output arose from which nodes in the input.
@@ -52,9 +53,9 @@ public enum Reduce {
     /// A collection of values that will be made available when reductions are being evaluated. To refer to one of them, just
     /// embed a node with the appropriate type; the content is ignored. See `KernelGen.Constant()`.
     public struct Library {
-        var buildValues: (Node) -> [NodeType: Eval.Value<Node.Value>]
+        var buildValues: (Node) -> [NodeType: Value]
 
-        private init(buildValues: @escaping (Node) -> [NodeType: Eval.Value<Node.Value>]) {
+        private init(buildValues: @escaping (Node) -> [NodeType: Value]) {
             self.buildValues = buildValues
         }
 
@@ -64,7 +65,7 @@ public enum Reduce {
         }
 
         /// Overlay additional context-insensitive values.
-        public func extend(with values: [NodeType: Eval.Value<Node.Value>]) -> Library {
+        public func extend(with values: [NodeType: Value]) -> Library {
             Library { root in
                 self.buildValues(root).merging(values, uniquingKeysWith: { $1 })
             }
@@ -252,9 +253,9 @@ public enum Reduce {
 //            print("lib: \(lib.keys)")
 
             // Like Kernel.eval, but then match only a unary .Fn result (and yield the raw value)
-            func evalToFn1(_ lambdaNode: Node) throws -> ((Node) throws -> Eval.Value<Node.Value>) {
+            func evalToFn1(_ lambdaNode: Node) throws -> ((Node) throws -> Value) {
                 let ast = Kernel.translate(lambdaNode, constants: lib)
-                let result = try Eval.eval(ast, env: .Empty)
+                let result = Eval.eval(ast, env: [:])
                 switch result {
                 case .Fn(arity: 1, let f):
                     return { n in try f([.Val(.Node(n))]) }
@@ -316,7 +317,7 @@ public enum Reduce {
 
 // MARK: -Internals
 
-    private static func makeResolver(within root: Node) -> Eval.Value<Node.Value> {
+    private static func makeResolver(within root: Node) -> Value {
         let nodesById = Node.Util.descendantsById(of: root)
 
         return Eval.Value.Fn(arity: 1) { args in
