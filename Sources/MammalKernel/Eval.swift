@@ -379,7 +379,7 @@ public enum Eval {
         // also need to get added to the mapping from the start.
         // Given all that, would it be simpler just to use a proper (hash-)map and not try to do
         // any of this rewriting jazz?
-        let idxToName: [N] = Array(node.collectNames())
+        let idxToName: [N] = Array(node.collectNames()) + externalEnv.keys
         let nameToIdx = Dictionary<N, UInt>(idxToName.enumerated().map { (idx, name) in (name, UInt(idx)) },
                                             uniquingKeysWith: { (k1, k2) in k1 })
         let nameIso: Iso<N, UInt> = Iso(
