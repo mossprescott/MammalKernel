@@ -42,20 +42,25 @@ public struct NodeType: Hashable {
     }
 }
 
-/// "Symbol" that indicates the meaning of an attribute with respect the to node that contains it.
+/// "Symbol" that indicates the meaning of an attribute with respect to the node that contains it.
 ///
 /// To avoid unintentional collisions, each name consists of a "language" prefix, (optional) type name,
 /// and attribute name separated by a slash.
 /// For example, a "lambda" expression in the kernel language will have an attribute `"kernel/lambda/body"`
 /// which contains the expression which is the body of the function.
 public struct AttrName: Hashable {
+    /// For example: `kernel/lambda` or just `kernel`, if the same attribute is used with more than one type of node.
     var prefix: String
+
+    /// For example, `body`.
     var name: String
 
+    /// For example: `kernel/lambda/body`.
     public var fullName: String {
         prefix + "/" + name
     }
 
+    /// Equivalent to `name`
     public var simpleName: String {
         name
     }
@@ -73,7 +78,7 @@ public struct AttrName: Hashable {
     }
 }
 
-/// Every node has an `id`,  `type`, and some kind of content, which may be a collection of attributes,
+/// Every node has an `id`,  `type`, and some kind of content, which may be a collection of named attributes,
 /// a sequence of nodes, a reference to another node, or nothing at all.
 public struct Node {
     public var id: NodeId
@@ -91,7 +96,8 @@ public struct Node {
         case Ref(NodeId)
 
         /// No contents; the node's meaning is carried entirely by its type. Note: this is here mostly
-        /// so you don't have to ask yourself whether an empty `Attrs` or `Elems` is appropriate.
+        /// so you don't have to ask yourself whether an empty `Attrs` or `Elems` is appropriate, but is otherwise isomorphic to
+        /// either.
         case Empty
     }
 
