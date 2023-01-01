@@ -7,29 +7,30 @@ class SimpleTrieTests: XCTestCase {
 
         XCTAssertNil(map[0])
         XCTAssertEqual(map.count, 0)
-        XCTAssertEqual(map.capacity(), 32)
+
+        XCTAssertEqual(map.capacity(), 32)  // Note: depends the table size, an implementation detail
     }
 
     func testOne() throws {
-        var map = SimpleTrie<String>()
-        map[0] = "abc"
+        let map: SimpleTrie = [0: "abc"]
 
         XCTAssertEqual(map[0], "abc")
         XCTAssertEqual(map.count, 1)
-        XCTAssertEqual(map.capacity(), 32)
+
+        XCTAssertEqual(map.capacity(), 32)  // Note: depends the table size, an implementation detail
     }
 
     func testBigOne() throws {
-        var map = SimpleTrie<String>()
-        map[100] = "abc"
+        let map: SimpleTrie = [100: "abc"]
 
         XCTAssertEqual(map[100], "abc")
         XCTAssertEqual(map.count, 1)
-        XCTAssertEqual(map.capacity(), 1024)
+
+        XCTAssertEqual(map.capacity(), 1024)  // Note: depends the table size, an implementation detail
     }
 
     func testMany() throws {
-        var map = SimpleTrie<Int>()
+        var map: SimpleTrie<Int> = [:]
 
         for i: UInt in 0..<1000 {
             map[i] = Int(i)
@@ -64,8 +65,7 @@ class SimpleTrieTests: XCTestCase {
     }
 
     func testFarLookup() throws {
-        var map = SimpleTrie<String>()
-        map[0] = "abc"
+        let map: SimpleTrie = [0: "abc"]
 
         let initialCapacity = map.capacity()
 
@@ -96,7 +96,7 @@ class SimpleTrieTests: XCTestCase {
         print("capacity: \(map.capacity())")
     }
 
-    /// Write a large number of values, spread out so there's only one or two values per leaf node, starting with an empty map.
+    /// Write a large number of values, spread out so there are only one or two values per leaf node, starting with an empty map.
     ///
     /// Best performance: 5 bits
     func testSparseWritePerformance() throws {
@@ -115,10 +115,7 @@ class SimpleTrieTests: XCTestCase {
     ///
     /// Best performance: pretty flat for 5-9 bits.
     func testReadPerformance() throws {
-        var map = SimpleTrie<Int>()
-        for i: UInt in 0..<1024 {
-            map[i] = Int(i)
-        }
+        let map = SimpleTrie<Int>(uniqueKeysWithValues: (0..<1024).map { ($0, Int($0)) })
 
         var sum: Int = 0
 
