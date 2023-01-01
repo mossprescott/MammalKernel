@@ -230,8 +230,80 @@ final class EvalTests: XCTestCase {
     }
 
     func testMutualRecursion() throws {
-        // TODO: a pair of functions that call each other a million times
-        throw XCTSkip("TODO")
+        // Encode bool into Int for simplicity
+        let _true = 1
+        let _false = 0
+
+        let dec: UInt = 0
+        let decFn = liftUnary { $0 - 1 }
+        let builtInEnv: Env = [dec: decFn]
+
+        // Note: even and odd are provided with explicit references to each other, to avoid the
+        // issue of mutually-recursive *declarations*. The point is that they *call* each other
+        // recursively.
+
+        // even 0 _odd = true
+        // even n _odd = _odd (n - 1) even
+        let evenFn: Expr = {
+            let evenRec: UInt = 10
+            let n: UInt = 11
+            let cont: UInt = 12
+            return Expr.Lambda(evenRec,
+                               params: [n, cont],
+                               body: Expr.Match(expr: .Var(n),
+                                                bindings: [],
+                                                body: .Literal(_true),
+                                                otherwise: .App(fn: .Var(cont),
+                                                                args: [
+                                                                    .App(fn: .Var(dec),
+                                                                         args: [.Var(n)]),
+                                                                    .Var(evenRec),
+                                                                ]),
+                                                match: lift { $0 == 0 }))
+        }()
+
+        // odd 0 _even = false
+        // odd n _even = _even (n - 1) odd
+        let oddFn: Expr = {
+            let oddRec: UInt = 20
+            let n: UInt = 21
+            let cont: UInt = 22
+            return Expr.Lambda(oddRec,
+                               params: [n, cont],
+                               body: Expr.Match(expr: .Var(n),
+                                                bindings: [],
+                                                body: .Literal(_false),
+                                                otherwise: .App(fn: .Var(cont),
+                                                                args: [
+                                                                    .App(fn: .Var(dec),
+                                                                         args: [.Var(n)]),
+                                                                    .Var(oddRec),
+                                                                ]),
+                                                match: lift { $0 == 0 }))
+        }()
+
+        func run(n: Int) -> Value {
+            let pgm: Expr = Expr.App(fn: evenFn, args: [.Literal(n), oddFn])
+            return Eval.eval(pgm, env: builtInEnv)
+        }
+
+        try run(n: 0)
+            .withVal { XCTAssertEqual($0, _true) }
+
+        try run(n: 1)
+            .withVal { XCTAssertEqual($0, _false) }
+
+        // Several thousand calls is enough to overflow the stack, if not optimized:
+        try run(n: 10_001)
+            .withVal { XCTAssertEqual($0, _false) }
+
+        // If we don't terminate, it's a timeout, not a stack overflow:
+        switch run(n: -1) {
+        case .Error(.TimeOut):
+            print("failed as expected")
+        default:
+            XCTFail("Should have produced an error")
+        }
     }
 
 
@@ -335,6 +407,18 @@ final class EvalTests: XCTestCase {
                 try args[1].withVal { y in
                     .Val(f(x, y))
                 }
+            }
+        }
+    }
+
+    /// Lift a unary operator to a `Fn` value which will fail if its arguments aren't one int.
+    func liftUnary(f: @escaping (Int) -> Int) -> Value {
+        Value.NativeFn(arity: 1) { args in
+            guard args.count == 1 else {
+                return .Error(Eval.RuntimeError.ArityError(expected: 1, found: args))
+            }
+            return try args[0].withVal { x in
+                .Val(f(x))
             }
         }
     }
