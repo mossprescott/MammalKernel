@@ -8,8 +8,8 @@ import Foundation
 ///
 /// - An attribute may contain a node or a primitive value; only nodes participate in the tree of potential locations.
 /// - For navigation purposes, it's useful to always have a notion of next-previous sibling, so the caller supplies an ordering that
-///     is applied to the *node*-containing attributes of any Attr node to define how they form a sequence. Note: it's not possible to
-///     navigate to a primitive-valued attribute, so any such attribute doesn't participate in the ordering.
+///   is applied to the *node*-containing attributes of any Attr node to define how they form a sequence. Note: it's not possible to
+///   navigate to a primitive-valued attribute, so any such attribute doesn't participate in the ordering.
 public struct Zipper {
     public var node: Node
 
