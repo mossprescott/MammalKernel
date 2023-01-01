@@ -284,202 +284,257 @@ public enum Eval {
     //    fatalError("TODO")
     //}
 
-    /// Evaluate an expression, producing a value (which may be an error.)
-    ///
-    /// Note: stack/step limits do not account for recursive calls inside native functions, expansion of quotations, and testing matches.
+    /// Evaluate an expression, producing a value (which may be an error). Default budgets for time and space are used.
     ///
     /// TODO: not public, if nobody needs to use it directly (except possibly tests)
     ///
-    /// - Parameters:
-    ///   - maxStack: maximum depth of recursive calls before giving up and yielding a `StackOverflow`.
-    ///   - maxSteps: maximum "steps" of evaluation that should be performed before giving up and yielding a `TimeOut`
+    /// See `Context.eval`
     ///
     /// - Returns: the result value, if evaluation completes normally;
     ///   `RuntimeError.TimeOut` if evaluation isn't finished after `budget` steps
-    static public func eval<N: Hashable, T>(_ node: Expr<N, T>,
-                                            env externalEnv: [N: Value<N, T>],
+    static public func eval<N: Hashable, T>(_ expr: Expr<N, T>,
+                                            env: [N: Value<N, T>],
                                             maxStack: Int = 100,
                                             maxSteps: Int = 100_000) -> Value<N, T> {
-        typealias Env = SimpleTrie<Value<UInt, T>>
+        var ctx = Context(maxStack: maxStack, maxSteps: maxSteps)
+        let result = ctx.eval(expr, env: env)
 
-        func with(_ env: Env, _ name: UInt, boundTo val: Value<UInt, T>) -> Env {
-            var newEnv = env
-            newEnv[name] = val
-            return newEnv
-        }
+        debugPrint(ctx)
 
-        func with(_ env: Env, names: [UInt], boundTo vals: [Value<UInt, T>]) throws -> Env {
-            guard names.count == vals.count else {
-                throw RuntimeError.ArityError(expected: names.count, found: vals)
-            }
-            return zip(names, vals).reduce(env) { (e, t) in
-                with(e, t.0, boundTo: t.1)
-            }
-        }
-
-        var steps = 0
-        var depth = 0
-
-        /// Inner evaluation loop.
-        func go(_ startNode: Expr<UInt, T>, env startEnv: Env) throws -> Value<UInt, T> {
-            if depth > maxStack {
-                throw RuntimeError<N, T>.StackOverflow
-            }
-            depth += 1
-            defer {
-                // Decrement the stack depth on the way out (after any "return"). This is probably
-                // too clever; just make it an explicit parameter?
-                depth -= 1
-            }
-
-            var node = startNode
-            var env = startEnv
-
-            while true {
-                if steps >= maxSteps {
-                    throw RuntimeError<N, T>.TimeOut
-                }
-                steps += 1
-
-                // If there is a tail-call to make, the next evaluation context is written here and
-                // the loop continues. Otherwise, we just return.
-                var nextNode: Expr<UInt, T>
-                var nextEnv: Env
-
-                switch node {
-                case .Literal(let val):
-                    return .Val(val)
-
-                case .RuntimeLiteral(let val):
-                    return val
-
-                case .Var(let name):
-                    if let val = env[name] {
-                        return val
-                    }
-                    else {
-                        throw RuntimeError<UInt, T>.NotBound(name)
-                    }
-
-                case .Let(let name, let expr, let body):
-                    let value = try go(expr, env: env)
-                    let newEnv = with(env, name, boundTo: value)
-
-                    nextNode = body
-                    nextEnv = newEnv
-                    // ... and loop
-
-                case .Lambda(let name, let params, let body):
-                    // Capture the (entire) environment, along with the node, and leave it to App to
-                    // sort out.
-                    return .Closure(name: name, params: params, body: body, captured: env)
-
-                case .App(let fn, let args):
-                    // First evaluate fn. If it's callable, then evaluate the arguments.
-                    let fnVal = try go(fn, env: env)
-                    switch fnVal {
-                    case .Closure(let name, let params, let body, let captured):
-                        // Tricky: evaluate the arguments recursively, but loop to evaluate the body,
-                        // to avoid consuming stack.
-                        // Note: the arguments are evaluated in the current context (env)
-                        let argVs = try args.map { try go($0, env: env) }
-                        guard argVs.count == params.count else {
-                            throw RuntimeError.ArityError(expected: params.count, found: argVs)
-                        }
-
-                        // Note: the body is evaluated in the `captured` environment, plus the value
-                        // for each parameter.
-                        var newEnv = captured!
-                        if let name = name {
-                            newEnv[name] = fnVal
-                        }
-                        newEnv = try with(newEnv, names: params, boundTo: argVs)
-
-                        nextNode = body
-                        nextEnv = newEnv
-                        // ... and loop
-
-                    case .NativeFn(let arity, let f):
-                        let argVs = try args.map { try go($0, env: env) }
-                        guard args.count == arity else {
-                            throw RuntimeError.ArityError(expected: arity, found: argVs)
-                        }
-                        // Note: a native fn call always uses the stack
-                        return try f(argVs)
-
-                    default:
-                        throw RuntimeError.TypeError(expected: "closure or native function", found: fnVal)
-                    }
-
-                case .Quote(let expand):
-                    // Note: we do track evaluation steps and depth of stack within these
-                    // recursive calls, but if `expand` does its own evaluation, we can't see into it
-                    func resolve(_ expr: Expr<UInt, T>) throws -> Value<UInt, T> {
-                        try go(expr, env: env)
-                    }
-                    return try expand(resolve)
-
-                case .Match(let expr, let bindings, let body, let otherwise, let match):
-                    let value = try go(expr, env: env)
-                    switch try match(value) {
-                    case .Matched(let boundValues):
-                        let newEnv = try with(env, names: bindings, boundTo: boundValues)
-                        nextNode = body
-                        nextEnv = newEnv
-                        // ... and loop
-                    case .NoMatch:
-                        nextNode = otherwise
-                        nextEnv = env
-                        // .. and loop
-                    }
-
-                case .Fail(let msg):
-                    return Value.Error(.UserError(message: msg))
-                }
-
-                // If we get here, we'll loop and continue with some new node and context.
-                node = nextNode
-                env = nextEnv
-            }
-        }
-
-        // Re-assign names for fast binding/lookup:
-        // Uh, so, this doesn't work for interesting cases because more nodes can be produced
-        // during evaluation (e.g. when unquotes are expanded). We'll have to be able to add new ids
-        // to the mapping as we encounter them.
-        // Also, names from the provided environment might not be referenced until later, so they
-        // also need to get added to the mapping from the start.
-        // Given all that, would it be simpler just to use a proper (hash-)map and not try to do
-        // any of this rewriting jazz?
-        let idxToName: [N] = Array(node.collectNames()) + externalEnv.keys
-        let nameToIdx = Dictionary<N, UInt>(idxToName.enumerated().map { (idx, name) in (name, UInt(idx)) },
-                                            uniquingKeysWith: { (k1, k2) in k1 })
-        let nameIso: Iso<N, UInt> = Iso(
-            map: { nameToIdx[$0]! },
-            unmap: { idxToName[Int($0)] })
-
-        let env: Env = SimpleTrie(uniqueKeysWithValues: externalEnv.map { (n, v) in (nameIso.map(n), v.mapName(nameIso)) })
-
-        let renamedRoot: Expr<UInt, T> = node.mapNames(nameIso)
-
-        do {
-            let result = try go(renamedRoot, env: env)
-            return result.mapName(nameIso.inverse)
-        }
-        catch let re as RuntimeError<UInt, T> {
-            // Wrap the captured error as a value:
-            return .Error(re.mapName(nameIso.inverse))
-        }
-        catch let error {
-            return .Error(.OtherError(message: "Unexpected error: \(error)"))
-        }
+        return result
     }
 
-//    /// Private wrapper for RuntimeErrors so we can use exception handling to capture them. Outside of this function, they're just
-//    /// ordinary values.
-//    fileprivate struct ThrowableRuntimeError<T>: Error {
-//        var error: RuntimeError<T>
-//    }
+    /// A record of the current state of evaluation in terms of the time/space budget. The same context be re-used to perform multiple
+    /// computations using the same budget.
+    public struct Context: CustomDebugStringConvertible {
+        /// Maximum number of actual recursive calls before the computation is killed. Note: this does not include tail-calls which
+        /// can be converted to iteration.
+        ///
+        /// In simple cases, a value of up to about 2,500 allows a runaway computation to be killed before the native stack is
+        /// exhausted. If you use a larger limit and run out stack, the process will just crash.
+        let maxStack: Int
+
+        /// Maximum number of evaluation steps before the computation is killed.
+        ///
+        /// Any value can be used here, depending on how long you're willing to wait. For simple computations, we can evaluate
+        /// a few million steps per second.
+        let maxSteps: Int
+
+        var stack = 0
+        var stackMax = 0
+        var steps = 0
+
+        public init(maxStack: Int, maxSteps: Int) {
+            self.maxStack = maxStack
+            self.maxSteps = maxSteps
+        }
+
+        /// Evaluate an expression, producing a value (which may be an error.)
+        ///
+        /// Keep track of a budget of time and space (in terms of evaluation steps and depth of stack.)
+        ///
+        /// Note: stack/step limits do not account for recursive calls inside native functions, expansion of quotations, and testing matches.
+        ///
+        ///
+        /// - Parameters:
+        ///   - maxStack: maximum depth of recursive calls before giving up and yielding a `StackOverflow`.
+        ///   - maxSteps: maximum "steps" of evaluation that should be performed before giving up and yielding a `TimeOut`
+        ///
+        /// - Returns: the result value, if evaluation completes normally;
+        ///   `RuntimeError.TimeOut` if evaluation isn't finished after `budget` steps
+        mutating func eval<N: Hashable, T>(_ rootExpr: Expr<N, T>, env externalEnv: [N: Value<N, T>]) -> Value<N, T> {
+
+            typealias Env = SimpleTrie<Value<UInt, T>>
+
+            func with(_ env: Env, _ name: UInt, boundTo val: Value<UInt, T>) -> Env {
+                var newEnv = env
+                newEnv[name] = val
+                return newEnv
+            }
+
+            func with(_ env: Env, names: [UInt], boundTo vals: [Value<UInt, T>]) throws -> Env {
+                guard names.count == vals.count else {
+                    throw RuntimeError.ArityError(expected: names.count, found: vals)
+                }
+                return zip(names, vals).reduce(env) { (e, t) in
+                    with(e, t.0, boundTo: t.1)
+                }
+            }
+
+            /// Inner evaluation loop.
+            func go(_ startExpr: Expr<UInt, T>, env startEnv: Env) throws -> Value<UInt, T> {
+                if stack > maxStack {
+                    throw RuntimeError<N, T>.StackOverflow
+                }
+                stack += 1
+                stackMax = max(stack, stackMax)  // for reporting
+                defer {
+                    // Decrement the stack depth on the way out (after any "return"). This is probably
+                    // too clever; just make it an explicit parameter?
+                    stack -= 1
+                }
+
+                // Together, these are the "continuation" to evaluate next:
+                var expr = startExpr
+                var env = startEnv
+
+                while true {
+                    if steps >= maxSteps {
+                        throw RuntimeError<N, T>.TimeOut
+                    }
+                    steps += 1
+
+                    // If there is a tail-call to make, the next continuation is written here and
+                    // the loop continues. Otherwise, we just return.
+                    var nextExpr: Expr<UInt, T>
+                    var nextEnv: Env
+
+                    switch expr {
+                    case .Literal(let val):
+                        return .Val(val)
+
+                    case .RuntimeLiteral(let val):
+                        return val
+
+                    case .Var(let name):
+                        if let val = env[name] {
+                            return val
+                        }
+                        else {
+                            throw RuntimeError<UInt, T>.NotBound(name)
+                        }
+
+                    case .Let(let name, let expr, let body):
+                        let value = try go(expr, env: env)
+                        let newEnv = with(env, name, boundTo: value)
+
+                        nextExpr = body
+                        nextEnv = newEnv
+                        // ... and loop
+
+                    case .Lambda(let name, let params, let body):
+                        // Capture the (entire) environment, along with the node, and leave it to App to
+                        // sort out.
+                        return .Closure(name: name, params: params, body: body, captured: env)
+
+                    case .App(let fn, let args):
+                        // First evaluate fn. If it's callable, then evaluate the arguments.
+                        let fnVal = try go(fn, env: env)
+                        switch fnVal {
+                        case .Closure(let name, let params, let body, let captured):
+                            // Tricky: evaluate the arguments recursively, but loop to evaluate the body,
+                            // to avoid consuming stack.
+                            // Note: the arguments are evaluated in the current context (env)
+                            let argVs = try args.map { try go($0, env: env) }
+                            guard argVs.count == params.count else {
+                                throw RuntimeError.ArityError(expected: params.count, found: argVs)
+                            }
+
+                            // Note: the body is evaluated in the `captured` environment, plus the value
+                            // for each parameter.
+                            var newEnv = captured!
+                            if let name = name {
+                                newEnv[name] = fnVal
+                            }
+                            newEnv = try with(newEnv, names: params, boundTo: argVs)
+
+                            nextExpr = body
+                            nextEnv = newEnv
+                            // ... and loop
+
+                        case .NativeFn(let arity, let f):
+                            let argVs = try args.map { try go($0, env: env) }
+                            guard args.count == arity else {
+                                throw RuntimeError.ArityError(expected: arity, found: argVs)
+                            }
+                            // Note: a native fn call always uses the stack
+                            return try f(argVs)
+
+                        default:
+                            throw RuntimeError.TypeError(expected: "closure or native function", found: fnVal)
+                        }
+
+                    case .Quote(let expand):
+                        // Note: we do track evaluation steps and depth of stack within these
+                        // recursive calls, but if `expand` does its own evaluation, we can't see into it
+                        func resolve(_ expr: Expr<UInt, T>) throws -> Value<UInt, T> {
+                            try go(expr, env: env)
+                        }
+                        return try expand(resolve)
+
+                    case .Match(let expr, let bindings, let body, let otherwise, let match):
+                        let value = try go(expr, env: env)
+                        switch try match(value) {
+                        case .Matched(let boundValues):
+                            let newEnv = try with(env, names: bindings, boundTo: boundValues)
+                            nextExpr = body
+                            nextEnv = newEnv
+                            // ... and loop
+                        case .NoMatch:
+                            nextExpr = otherwise
+                            nextEnv = env
+                            // .. and loop
+                        }
+
+                    case .Fail(let msg):
+                        return Value.Error(.UserError(message: msg))
+                    }
+
+                    // If we get here, we'll loop and continue with some new node and context.
+                    expr = nextExpr
+                    env = nextEnv
+                }
+            }
+
+            // Re-assign names for fast binding/lookup:
+            // Uh, so, this doesn't work for interesting cases because more nodes can be produced
+            // during evaluation (e.g. when unquotes are expanded). We'll have to be able to add new ids
+            // to the mapping as we encounter them.
+            // Also, names from the provided environment might not be referenced until later, so they
+            // also need to get added to the mapping from the start.
+            // Given all that, would it be simpler just to use a proper (hash-)map and not try to do
+            // any of this rewriting jazz?
+            let idxToName: [N] = Array(rootExpr.collectNames()) + externalEnv.keys
+            let nameToIdx = Dictionary<N, UInt>(idxToName.enumerated().map { (idx, name) in (name, UInt(idx)) },
+                                                uniquingKeysWith: { (k1, k2) in k1 })
+            let nameIso: Iso<N, UInt> = Iso(
+                map: { nameToIdx[$0]! },
+                unmap: { idxToName[Int($0)] })
+
+            let env: Env = SimpleTrie(uniqueKeysWithValues: externalEnv.map { (n, v) in (nameIso.map(n), v.mapName(nameIso)) })
+
+            let renamedRoot: Expr<UInt, T> = rootExpr.mapNames(nameIso)
+
+            do {
+                let result = try go(renamedRoot, env: env)
+                return result.mapName(nameIso.inverse)
+            }
+            catch let re as RuntimeError<UInt, T> {
+                // Wrap the captured error as a value (and rewrite any referenced names):
+                return .Error(re.mapName(nameIso.inverse))
+            }
+            catch let error {
+                return .Error(.OtherError(message: "Unexpected error: \(error)"))
+            }
+        }
+
+        /// Portion of the available steps that have been used so far, between 0.0 and 1.0.
+        public var consumedSteps: Double {
+            Double(steps)/Double(maxSteps)
+        }
+
+        /// Portion of the available stack that was ever consumed, between 0.0 and 1.0.
+        public var consumedStack: Double {
+            Double(stackMax)/Double(maxStack)
+        }
+
+        /// Summary of time and space used.
+        public var debugDescription: String {
+            let stepsPct = String(format: "%.1f%%", 100*consumedSteps)
+            let stackPct = String(format: "%.1f%%", 100*consumedStack)
+            return "steps used: \(stepsPct); max stack: \(stackPct)"
+        }
+    }
 }
 
 /// A random FP concept that leaked in: a bi-directional mapping from one type to another. To be useful, the mapping should be
@@ -583,5 +638,14 @@ extension Eval.Expr {
         }
 
         return go(self)
+    }
+}
+
+extension Dictionary {
+    /// Returns a new dictionary containing the values of this dictionary with the keys transformed by the given closure.
+    ///
+    /// Precondition: The transformed keys must not contain any duplicates.
+    func mapKeysUnsafe<T>(_ transform: (Key) throws -> T) rethrows -> Dictionary<T, Value> {
+        Dictionary<T, Value>(uniqueKeysWithValues: try Array(self).map { (k, v) in (try transform(k), v) })
     }
 }
