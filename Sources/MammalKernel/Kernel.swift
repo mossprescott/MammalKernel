@@ -20,8 +20,8 @@ public enum Kernel {
     /// then translating the resulting value back into a source-level representation.
     ///
     /// - Parameter constants: A mapping giving additional node types, each of which is to be translated to
-    /// the provided literal value. This provides a mechanism to resolve references to values provided by the platform,
-    /// for example built-in functions.
+    ///   the provided literal value. This provides a mechanism to resolve references to values provided by the platform,
+    ///   for example built-in functions.
     public static func eval(_ program: Node, constants: [NodeType: Value]) throws -> Node {
         let ast = translate(program, constants: constants)
 
@@ -496,7 +496,7 @@ public enum Kernel {
 
 // MARK: - Reverse translation, aka "repr", aka "print"
 
-    /// Convert the result of evaluation back to a value in the kernel. Wherever possible, the result is
+    /// Convert the result of evaluation back to a value in the kernel language. Wherever possible, the result is
     /// an expression that evaluates to the same value.
     /// Ordinary values are simply returned, but unevaluated functions and errors both get converted
     /// back to "expressions" that aren't very useful when evaluated.
