@@ -225,7 +225,7 @@ final class EvalTests: XCTestCase {
         let n2 = 100_000
         let result2 = Eval.eval(Expr.App(fn: fn, args: [.Literal(n2), .Literal(0)]),
                                    env: builtInEnv,
-                                maxSteps: n2*100)
+                                maxSteps: n2*20)
         try result2.withVal { XCTAssertEqual($0, n2*(n2+1)/2) }
     }
 
@@ -272,9 +272,10 @@ final class EvalTests: XCTestCase {
                                    env: builtInEnv)
         try result1.withVal { XCTAssertEqual($0, 21) }
 
-        let n2 = 1000*1000
+        let n2 = 1_000_000
         switch Eval.eval(Expr.App(fn: fn, args: [.Literal(n2)]),
-                         env: builtInEnv) {
+                         env: builtInEnv,
+                         maxStack: 2_500) {
         case .Error(.StackOverflow):
             print("Overflowed as expected")
         default:
