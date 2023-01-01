@@ -54,7 +54,7 @@ public struct SimpleTrie<Value> {
 
     /// A empty table, used to initialize any new node. Ideally would be shared.
     @usableFromInline
-    static func empty() -> Node { Node.Leaf(Array(repeating: nil, count: Int(TABLE_SIZE))) }
+    internal static func empty() -> Node { Node.Leaf(Array(repeating: nil, count: Int(TABLE_SIZE))) }
 }
 
 extension SimpleTrie {
