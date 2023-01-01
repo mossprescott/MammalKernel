@@ -456,12 +456,9 @@ public enum Eval {
                                             uniquingKeysWith: { (k1, k2) in k1 })
         let nameIso: Iso<N, UInt> = Iso(
             map: { nameToIdx[$0]! },
-            unmap: { idx in idxToName[Int(idx)] })
+            unmap: { idxToName[Int($0)] })
 
-        var env: Env = SimpleTrie()
-        for (n, v) in externalEnv {
-            env[nameToIdx[n]!] = v.mapName(nameIso)
-        }
+        let env: Env = SimpleTrie(uniqueKeysWithValues: externalEnv.map { (n, v) in (nameIso.map(n), v.mapName(nameIso)) })
 
         let renamedRoot: Expr<UInt, T> = node.mapNames(nameIso)
 

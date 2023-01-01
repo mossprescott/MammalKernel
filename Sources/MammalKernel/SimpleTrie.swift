@@ -28,7 +28,7 @@ public struct SimpleTrie<Value> {
     @usableFromInline
     var node: Node
 
-    init() {
+    private init() {
         node = SimpleTrie<Value>.empty()
     }
 
@@ -181,6 +181,8 @@ extension SimpleTrie: Sequence {
     }
 }
 
+// MARK: Mapping
+
 extension SimpleTrie {
     /// O(n)
     public func mapValues<T>(_ transform: (Value) throws -> T) rethrows -> SimpleTrie<T> {
@@ -192,6 +194,8 @@ extension SimpleTrie {
     }
 }
 
+// MARK: Constructors
+
 extension SimpleTrie: ExpressibleByDictionaryLiteral {
     public typealias Key = UInt
 
@@ -200,12 +204,27 @@ extension SimpleTrie: ExpressibleByDictionaryLiteral {
         for (k, v) in elements {
             tr[k] = v
         }
-        node = tr.node
+        self = tr
+    }
+}
+
+extension SimpleTrie {
+    public init<S>(uniqueKeysWithValues keysAndValues: S) where S : Sequence, S.Element == (UInt, Value) {
+        var tr = SimpleTrie()
+        for (k, v) in keysAndValues {
+            tr[k] = v
+        }
+        self = tr
     }
 }
 
 // MARK: - Debugging aids
 
+extension SimpleTrie: CustomStringConvertible {
+    public var description: String {
+        return "trie... (descr.)"
+    }
+}
 extension SimpleTrie: CustomDebugStringConvertible {
     public var debugDescription: String {
         (["["] + Array(self).map { (k, v) in "\(k): \(v)," } + ["]"]).joined(separator: ", ")
